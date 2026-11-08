@@ -24,6 +24,15 @@ jobs:
         run: npm run check
       - name: Test engine
         run: cargo test --release -p openaudiopower-core
+      - name: Stage DirectML runtime
+        shell: pwsh
+        run: |
+          # ort downloads DirectML.dll during the engine build; the installer takes it from a fixed path
+          $dll = Get-ChildItem target/release/DirectML.dll, "$env:LOCALAPPDATA/ort.pyke.io" -Recurse -Filter DirectML.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) { throw "DirectML.dll not found" }
+          New-Item -ItemType Directory -Force src-tauri/redist | Out-Null
+          Copy-Item $dll.FullName src-tauri/redist/DirectML.dll
+          Get-Item src-tauri/redist/DirectML.dll
       - name: Build installer
         run: npx tauri build
       - name: Collect artifacts

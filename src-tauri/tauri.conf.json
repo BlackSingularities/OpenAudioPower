@@ -39,7 +39,7 @@
     "shortDescription": "Audio recording, editing and stem separation studio",
     "longDescription": "OpenAudioPower records, edits and processes audio on a multitrack timeline and separates any song (MP3, FLAC, WAV…) into vocals, drums, bass, guitar, piano and other instruments. Design and development: redzikowski.com",
     "licenseFile": "../LICENSE",
-    "resources": { "../target/release/DirectML.dll": "DirectML.dll" },
+    "resources": { "redist/DirectML.dll": "DirectML.dll" },
     "fileAssociations": [
       { "ext": ["oap"], "name": "OpenAudioPower project", "description": "OpenAudioPower project", "role": "Editor" }
     ],
