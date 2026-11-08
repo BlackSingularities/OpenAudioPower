@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Type-check UI
+        run: npm run check
+      - name: Test engine
+        run: cargo test --release -p openaudiopower-core
+      - name: Build installer
+        run: npx tauri build
+      - name: Collect artifacts
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+          New-Item -ItemType Directory -Force dist-release | Out-Null
+          Get-ChildItem target/release/bundle/nsis/*.exe | ForEach-Object { Copy-Item $_ "dist-release/OpenAudioPower-$v-setup-x64.exe" }
+          Get-ChildItem dist-release
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.ver.outputs.version) }}
+          name: OpenAudioPower ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          make_latest: true
+          files: dist-release/*

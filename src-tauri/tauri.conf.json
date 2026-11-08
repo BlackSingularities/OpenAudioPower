@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenAudioPower",
+  "version": "1.0.0",
+  "identifier": "com.redzikowski.openaudiopower",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1430",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OpenAudioPower",
+        "width": 1600,
+        "height": 980,
+        "minWidth": 1100,
+        "minHeight": 680,
+        "center": true,
+        "theme": "Dark",
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "dragDropEnabled": true,
+        "windowEffects": { "effects": ["acrylic"] }
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "redzikowski.com",
+    "copyright": "© redzikowski.com",
+    "homepage": "https://redzikowski.com",
+    "category": "Music",
+    "shortDescription": "Audio recording, editing and stem separation studio",
+    "longDescription": "OpenAudioPower records, edits and processes audio on a multitrack timeline and separates any song (MP3, FLAC, WAV…) into vocals, drums, bass, guitar, piano and other instruments. Design and development: redzikowski.com",
+    "licenseFile": "../LICENSE",
+    "resources": { "../target/release/DirectML.dll": "DirectML.dll" },
+    "fileAssociations": [
+      { "ext": ["oap"], "name": "OpenAudioPower project", "description": "OpenAudioPower project", "role": "Editor" }
+    ],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "languages": ["Polish", "English"],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perMachine",
+        "customLanguageFiles": { "Polish": "nsis/Polish.nsh" },
+        "installerHooks": "nsis/hooks.nsh"
+      }
+    }
+  }
+}
