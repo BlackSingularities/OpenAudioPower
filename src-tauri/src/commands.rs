@@ -672,6 +672,34 @@ pub async fn export_regions(h: AppHandle, dir: String, project: Project, regions
     .await
 }
 
+/// Auto Duck: volume automation for a track that dips wherever `control` (another track)
+/// is louder than the threshold. Returns dB offsets for the target's volume envelope.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn auto_duck(h: AppHandle, project: Project, control: u64, start: i64, end: i64, threshold: f32, duck: f32, fall: f32, rise: f32, hold: f32) -> R<Vec<mix::AutoPoint>> {
+    let app = app_state(&h);
+    let cancel = app.new_job();
+    blocking(move || {
+        let src = app.engine.sources();
+        // the control track alone, as it sounds after its own effects and fader
+        let mut solo = project.clone();
+        solo.master = Default::default();
+        for t in solo.tracks.iter_mut() {
+            t.solo = t.id == control;
+            if t.id == control {
+                t.mute = false;
+            }
+        }
+        let end = if end > start { end } else { project.length() };
+        let buf = mix::render_range(&solo, &src, app.rate(), start, end, 0.0, &|_| {}, &cancel);
+        if cancel.is_set() {
+            return Err("cancelled".into());
+        }
+        Ok(openaudiopower_core::stretch::duck_points(&buf, start, threshold, duck, fall, rise, hold))
+    })
+    .await
+}
+
 /// New source from a signal generator (tone, noise, sweep, DTMF, clicks, silence).
 #[tauri::command]
 pub fn generate_source(app: State<'_, Arc<App>>, spec: openaudiopower_core::generate::Gen, seconds: f32, stereo: bool, name: String) -> SourceInfo {

@@ -67,6 +67,7 @@ pub fn run() {
             commands::export_tracks,
             commands::export_regions,
             commands::generate_source,
+            commands::auto_duck,
             commands::read_text_file,
             commands::write_text_file,
             commands::export_source,

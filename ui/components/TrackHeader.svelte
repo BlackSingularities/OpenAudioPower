@@ -3,7 +3,7 @@
   import Meter from "./Meter.svelte";
   import { t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
-  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly, autoOf, setGainLinked, freezeTrack, unfreezeTrack, GROUP_COLORS, nextGroup } from "../lib/store.svelte";
+  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly, autoOf, setGainLinked, freezeTrack, unfreezeTrack, GROUP_COLORS, nextGroup, openAutoDuck } from "../lib/store.svelte";
 
   let { tr }: { tr: Track } = $props();
 
@@ -93,6 +93,7 @@
       { sep: true },
       { label: t("autoVolume"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "volume") },
       { label: t("autoPan"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "pan") },
+      ...(tr.bus ? [] : [{ label: "Auto Duck…", icon: "chart", run: () => openAutoDuck(tr.id) }]),
       { label: t("autoClear"), icon: "x", disabled: !autoCount, run: clearAuto },
       { sep: true },
       { label: t("removeTrack"), icon: "trash", danger: true, run: () => removeTrack(tr.id) },

@@ -59,6 +59,20 @@ pub enum Op {
     #[serde(rename_all = "camelCase")]
     TrimSilence { threshold: f32 },
     Declick { strength: f32 },
+    /// Shortens pauses inside the range (Audacity's Truncate Silence).
+    #[serde(rename_all = "camelCase")]
+    TruncateSilence { threshold: f32, min_length: f32, keep: f32 },
+    /// Extreme stretch with randomised phases; `window` in seconds.
+    Paulstretch { factor: f32, window: f32 },
+    /// Tempo (percent) and pitch (semitones) gliding from start to end values.
+    #[serde(rename_all = "camelCase")]
+    SlidingStretch { tempo_start: f32, tempo_end: f32, pitch_start: f32, pitch_end: f32 },
+    /// The range plays `count` more times right after itself.
+    Repeat { count: u32 },
+    /// Sample rate: `reinterpret` plays the audio as if it had been recorded at `rate` (speed and
+    /// pitch change, like Audacity's Set Rate); otherwise it is converted to `rate` and back,
+    /// which limits the bandwidth (e.g. 8000 Hz telephone sound).
+    Resample { rate: u32, #[serde(default)] reinterpret: bool },
     /// Pencil: replaces the range with these sample values (all channels).
     Draw { values: Vec<f32> },
     #[serde(rename_all = "camelCase")]
@@ -286,6 +300,38 @@ pub fn apply(src: &AudioBuffer, start: usize, end: usize, op: &Op, cancel: &Canc
             let mut p = part;
             declick(&mut p, *strength);
             p
+        }
+        Op::TruncateSilence { threshold, min_length, keep } => crate::stretch::truncate_silence(&part, *threshold, *min_length, *keep).0,
+        Op::Paulstretch { factor, window } => {
+            let ch: Vec<Vec<f32>> = part.ch.par_iter().map(|c| crate::stretch::paulstretch(c, rate, *factor, *window, cancel)).collect();
+            AudioBuffer::from_channels(rate, ch)
+        }
+        Op::SlidingStretch { tempo_start, tempo_end, pitch_start, pitch_end } => {
+            let ch: Vec<Vec<f32>> = part.ch.par_iter().map(|c| crate::stretch::sliding_stretch(c, *tempo_start, *tempo_end, *pitch_start, *pitch_end, cancel)).collect();
+            // channels can differ by a few samples; even them out
+            let len = ch.iter().map(|c| c.len()).min().unwrap_or(0);
+            AudioBuffer::from_channels(rate, ch.into_iter().map(|mut c| { c.truncate(len); c }).collect())
+        }
+        Op::Repeat { count } => {
+            let k = (*count).clamp(1, 1000) as usize + 1;
+            let ch: Vec<Vec<f32>> = part.ch.iter().map(|c| c.repeat(k)).collect();
+            AudioBuffer::from_channels(rate, ch)
+        }
+        Op::Resample { rate: to, reinterpret } => {
+            let to = (*to).clamp(1000, 384_000) as f64;
+            let from = rate as f64;
+            if *reinterpret {
+                AudioBuffer::from_channels(rate, crate::resample::resample_ratio(&part.ch, from / to))
+            } else {
+                let down = crate::resample::resample_ratio(&part.ch, to / from);
+                let mut back = crate::resample::resample_ratio(&down, from / to);
+                back.iter_mut().for_each(|c| c.resize(part.frames(), 0.0));
+                let mut p = AudioBuffer::from_channels(rate, back);
+                if !whole {
+                    blend_edges(&part, &mut p, edge);
+                }
+                p
+            }
         }
         Op::Draw { values } => {
             let mut p = part;

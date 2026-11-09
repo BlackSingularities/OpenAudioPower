@@ -16,6 +16,7 @@ pub mod repair;
 pub mod resample;
 pub mod separate;
 pub mod spectral;
+pub mod stretch;
 
 pub use buffer::{AudioBuffer, Meta};
 

@@ -198,6 +198,8 @@ export const api = {
   exportMix: (path: string, project: unknown, options: unknown) => invoke<void>("export_mix", { path, project, options }),
   exportTracks: (dir: string, project: unknown, options: unknown) => invoke<string[]>("export_tracks", { dir, project, options }),
   exportRegions: (dir: string, project: unknown, regions: { name: string; start: number; end: number }[], options: unknown) => invoke<string[]>("export_regions", { dir, project, regions, options }),
+  autoDuck: (project: unknown, control: number, start: number, end: number, threshold: number, duck: number, fall: number, rise: number, hold: number) =>
+    invoke<{ t: number; v: number }[]>("auto_duck", { project, control, start, end, threshold, duck, fall, rise, hold }),
   generateSource: (spec: unknown, seconds: number, stereo: boolean, name: string) => invoke<SourceInfo>("generate_source", { spec, seconds, stereo, name }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
   writeTextFile: (path: string, text: string) => invoke<void>("write_text_file", { path, text }),

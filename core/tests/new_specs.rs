@@ -70,3 +70,22 @@ fn new_ops_run() {
         }
     }
 }
+
+/// Operations that change the length: they must deserialize and give finite audio.
+#[test]
+fn length_changing_ops_run() {
+    let src = noise(44100, 0.5);
+    for js in [
+        r#"{"op":"truncateSilence","threshold":-45,"minLength":600,"keep":350}"#,
+        r#"{"op":"paulstretch","factor":4,"window":0.1}"#,
+        r#"{"op":"slidingStretch","tempoStart":0,"tempoEnd":-30,"pitchStart":0,"pitchEnd":3}"#,
+        r#"{"op":"repeat","count":2}"#,
+        r#"{"op":"resample","rate":8000,"reinterpret":false}"#,
+        r#"{"op":"resample","rate":22050,"reinterpret":true}"#,
+    ] {
+        let op: Op = serde_json::from_str(js).unwrap_or_else(|e| panic!("{js}: {e}"));
+        let out = apply(&src, 0, 0, &op, &Cancel::default()).unwrap();
+        assert!(out.frames() > 0, "{js}");
+        assert!(out.ch.iter().flatten().all(|x| x.is_finite()), "{js}");
+    }
+}

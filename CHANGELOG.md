@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Skracanie pauz wewnątrz nagrania (jak Truncate Silence w Audacity): pauzy cichsze od progu i dłuższe od zadanej długości są skracane, a miejsca cięcia łączy krótki crossfade.
+- Auto Duck (menu ścieżki, Ścieżki → Auto Duck): ścisza ścieżkę tam, gdzie gra inna, i zapisuje to jako krzywą głośności, którą można dalej poprawiać.
+- Paulstretch: ekstremalne, „ambientowe” rozciągnięcie dźwięku nawet 50-krotnie.
+- Płynna zmiana tempa i wysokości od początku do końca zaznaczenia (Sliding Stretch).
+- Powtarzanie fragmentu oraz zmiana częstotliwości próbkowania: przeliczenie z ograniczeniem pasma (np. dźwięk telefoniczny 8 kHz) albo odtwarzanie jak nagrane w innej częstotliwości.
+
 ## 1.3.0
 
 Mikser:

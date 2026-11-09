@@ -12,7 +12,7 @@
     removeTrack, separateCmd, addMarker, toggleLoop,
     openSpectral,
     openRemix,
-    karaoke, addLabel, addBusCmd, addReverbSend, freezeTrack, unfreezeTrack, track as trackOf } from "../lib/store.svelte";
+    karaoke, addLabel, addBusCmd, addReverbSend, freezeTrack, unfreezeTrack, openAutoDuck, track as trackOf } from "../lib/store.svelte";
 
   let { onUpdateCheck, onQuit }: { onUpdateCheck: () => void; onQuit: () => void } = $props();
 
@@ -111,6 +111,7 @@
         trackOf(ed.selTrack)?.freeze
           ? { label: t("unfreeze"), icon: "snow", run: () => ed.selTrack && unfreezeTrack(ed.selTrack) }
           : { label: t("freeze"), icon: "snow", disabled: !trackOf(ed.selTrack)?.clips.length || !!trackOf(ed.selTrack)?.bus, run: () => ed.selTrack && freezeTrack(ed.selTrack) },
+        { label: "Auto Duck…", icon: "chart", disabled: !ed.selTrack || !!trackOf(ed.selTrack)?.bus, run: () => openAutoDuck() },
         { label: t("recOptions") + "…", icon: "clock", run: () => (app.dialogs.timer = true) },
         { sep: true },
         { label: t("loop"), icon: "loop", hint: "L", run: toggleLoop },

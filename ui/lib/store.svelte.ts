@@ -160,7 +160,9 @@ export const app = $state({
   sources: [] as SourceInfo[],
   job: null as Job | null,
   toasts: [] as Toast[],
-  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false, generate: false, labels: false, history: false, timer: false },
+  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false, generate: false, labels: false, history: false, timer: false, duck: false },
+  /** track that Auto Duck writes automation to */
+  duckTarget: null as number | null,
   /** scheduled timer recording */
   timerRec: null as null | { at: number; seconds: number },
   stemSource: null as { id: number; start: number; end: number; trackId: number | null; clipStart: number } | null,
@@ -1040,6 +1042,31 @@ export function labelsFromText(text: string): number {
       P.p.markers.sort((x, y) => x.pos - y.pos);
     }, { label: t("labelsImport") });
   return add.length;
+}
+
+// ───────────────────────────── auto duck ─────────────────────────────
+
+export function openAutoDuck(target: number | null = ed.selTrack) {
+  if (!target) return toast(t("duckPickTrack"), "info");
+  app.duckTarget = target;
+  app.dialogs.duck = true;
+}
+
+/** Writes a volume envelope on `target` that dips while `control` plays (in the selection or everywhere). */
+export async function autoDuck(target: number, control: number, o: { threshold: number; duck: number; fall: number; rise: number; hold: number }, useRange: boolean) {
+  const p = $state.snapshot(P.p);
+  const range = useRange && ed.sel ? ed.sel : { start: 0, end: projectLength() };
+  const pts = await job("duck", () => api.autoDuck({ tracks: p.tracks, master: p.master }, control, range.start, range.end, o.threshold, o.duck, o.fall, o.rise, o.hold));
+  if (!pts) return 0;
+  commit(() => {
+    const a = autoOf(track(target)!);
+    // keep the envelope outside the range, replace it inside
+    const keep = a.volume.filter((x) => x.t < range.start || x.t > range.end);
+    const edge = useRange && ed.sel ? [{ t: range.start, v: 0 }, ...pts, { t: range.end, v: 0 }] : pts;
+    a.volume = [...keep, ...edge].sort((x, y) => x.t - y.t).filter((x, i, arr) => i === 0 || x.t !== arr[i - 1].t);
+    a.show = "volume";
+  }, { label: "Auto Duck" });
+  return pts.length / 4;
 }
 
 // ───────────────────────────── generators ─────────────────────────────

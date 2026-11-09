@@ -59,14 +59,14 @@
   // ── process tab ──
   const OP_GROUPS: { label: [string, string]; ops: string[] }[] = [
     { label: ["Głośność", "Level"], ops: ["gain", "normalize", "fadeIn", "fadeOut"] },
-    { label: ["Naprawa", "Repair"], ops: ["denoise", "declick", "declip", "dehum", "deplosive", "level", "removeDc", "trimSilence"] },
-    { label: ["Czas i wysokość", "Time & pitch"], ops: ["pitch", "stretch", "speed", "reverse"] },
+    { label: ["Naprawa", "Repair"], ops: ["denoise", "declick", "declip", "dehum", "deplosive", "level", "removeDc", "truncateSilence", "trimSilence"] },
+    { label: ["Czas i wysokość", "Time & pitch"], ops: ["pitch", "stretch", "speed", "slidingStretch", "paulstretch", "repeat", "resample", "reverse"] },
     { label: ["Kanały i faza", "Channels & phase"], ops: ["invert", "silence", "mono", "stereo", "swapChannels"] },
   ];
   const OP_ICON: Record<string, string> = {
     gain: "volume", normalize: "chart", fadeIn: "up", fadeOut: "down", denoise: "sparkles", declick: "wand", removeDc: "minus",
     trimSilence: "scissors", pitch: "music", stretch: "fit", speed: "right", reverse: "undo", invert: "refresh", silence: "mute",
-    mono: "other", stereo: "headphones", swapChannels: "split",
+    mono: "other", stereo: "headphones", swapChannels: "split", truncateSilence: "scissors", slidingStretch: "chart", paulstretch: "sparkles", repeat: "loop", resample: "wave",
   };
   const FX_ICON: Record<string, string> = { eq: "sliders", dyn: "chart", space: "sparkles", mod: "wave", color: "fx", util: "settings" };
 
