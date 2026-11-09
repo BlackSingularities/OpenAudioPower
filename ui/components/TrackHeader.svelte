@@ -3,7 +3,7 @@
   import Meter from "./Meter.svelte";
   import { t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
-  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly, autoOf } from "../lib/store.svelte";
+  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly, autoOf, setGainLinked, freezeTrack, unfreezeTrack, GROUP_COLORS, nextGroup } from "../lib/store.svelte";
 
   let { tr }: { tr: Track } = $props();
 
@@ -74,7 +74,22 @@
       { label: t("moveDown"), icon: "down", run: () => move(1) },
       { sep: true },
       { label: t("effects"), icon: "fx", run: () => ((ed.selTrack = tr.id), (ed.inspectorTab = "track")) },
-      { label: t("stemSeparation"), icon: "stems", disabled: !tr.clips.length, run: () => ((ed.selClips = [tr.clips[0].id]), openStemDialog()) },
+      ...(tr.bus
+        ? []
+        : [
+            { label: t("stemSeparation"), icon: "stems", disabled: !tr.clips.length, run: () => ((ed.selClips = [tr.clips[0].id]), openStemDialog()) },
+            tr.freeze ? { label: t("unfreeze"), icon: "snow", run: () => unfreezeTrack(tr.id) } : { label: t("freeze"), icon: "snow", disabled: !tr.clips.length, run: () => freezeTrack(tr.id) },
+          ]),
+      {
+        label: t("group"),
+        icon: "link",
+        children: [
+          { label: t("noGroup"), icon: tr.group ? undefined : "check", run: () => commit(() => (getTrack(tr.id)!.group = 0)) },
+          ...GROUP_COLORS.map((_, i) => ({ label: `${t("group")} ${i + 1}`, icon: tr.group === i + 1 ? "check" : "link", run: () => commit(() => (getTrack(tr.id)!.group = i + 1)) })),
+          { sep: true },
+          { label: t("newGroup"), icon: "plus", run: () => commit(() => (getTrack(tr.id)!.group = nextGroup())) },
+        ],
+      },
       { sep: true },
       { label: t("autoVolume"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "volume") },
       { label: t("autoPan"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "pan") },
@@ -86,8 +101,7 @@
 
   // live volume drag (one undo step)
   function vol(e: Event) {
-    getTrack(tr.id)!.gain = +(e.target as HTMLInputElement).value;
-    syncEngine();
+    setGainLinked(tr.id, +(e.target as HTMLInputElement).value);
   }
   function pan(e: Event) {
     getTrack(tr.id)!.pan = +(e.target as HTMLInputElement).value;
@@ -122,7 +136,11 @@
   oncontextmenu={menu}
 >
   <div class="top">
-    <button class="swatch" style="background:{tr.color}" aria-label={t("color")} data-tip={t("color")} onclick={cycleColor}></button>
+    {#if tr.bus}
+      <span class="busic" data-tip={t("bus")}><Icon name="bus" size={13} /></span>
+    {:else}
+      <button class="swatch" style="background:{tr.color}" aria-label={t("color")} data-tip={t("color")} onclick={cycleColor}></button>
+    {/if}
     <button class="spk" class:off={tr.mute} onclick={() => toggleMute([tr.id])} aria-label={t("muteToggle")} data-tip="{t('muteToggle')}"><Icon name={tr.mute ? "mute" : "volume"} size={15} /></button>
     {#if renaming}
       <!-- svelte-ignore a11y_autofocus -->
@@ -130,11 +148,13 @@
     {:else}
       <button class="name" ondblclick={startRename} title={tr.name}>{tr.name}</button>
     {/if}
+    {#if tr.freeze}<button class="frz" onclick={() => unfreezeTrack(tr.id)} data-tip={t("frozenHint")}><Icon name="snow" size={13} /></button>{/if}
+    {#if tr.group}<span class="grp" style="background:{GROUP_COLORS[(tr.group - 1) % GROUP_COLORS.length]}" data-tip="{t('group')} {tr.group}"></span>{/if}
     <button class="btn ghost sm icon" aria-label="menu" onclick={menu}><Icon name="more" size={15} /></button>
   </div>
   <div class="btns">
     <button class="tb s" class:on={tr.solo} onclick={(e) => soloOnly([tr.id], e.ctrlKey || e.metaKey)} data-tip={t("soloOnly")}><Icon name="headphones" size={11} />S</button>
-    <button class="tb r" class:on={tr.armed} onclick={() => toggle("armed")} data-tip={t("arm")}><Icon name="record" size={11} /></button>
+    {#if !tr.bus}<button class="tb r" class:on={tr.armed} onclick={() => toggle("armed")} data-tip={t("arm")}><Icon name="record" size={11} /></button>{/if}
     <button class="tb fx" class:on={tr.effects.some((x) => x.on)} onclick={() => ((ed.selTrack = tr.id), (ed.inspectorTab = "track"))} data-tip={t("effects")}>
       FX{#if tr.effects.length}<span class="n">{tr.effects.length}</span>{/if}
     </button>
@@ -146,7 +166,7 @@
   </div>
   {#if tr.height >= 80}
     <div class="faders">
-      <input type="range" class="vol" min="-60" max="12" step="0.1" value={tr.gain} style="--fill:{((tr.gain + 60) / 72) * 100}%" onpointerdown={beginGesture} oninput={vol} onchange={endGesture} ondblclick={() => commit(() => (getTrack(tr.id)!.gain = 0))} data-tip="{t('volume')}: {tr.gain.toFixed(1)} dB" />
+      <input type="range" class="vol" min="-60" max="12" step="0.1" value={tr.gain} style="--fill:{((tr.gain + 60) / 72) * 100}%" onpointerdown={beginGesture} oninput={vol} onchange={endGesture} ondblclick={() => (beginGesture(), setGainLinked(tr.id, 0), endGesture())} data-tip="{t('volume')}: {tr.gain.toFixed(1)} dB" />
       <input type="range" class="pan" min="-1" max="1" step="0.01" value={tr.pan} style="--fill:{((tr.pan + 1) / 2) * 100}%" onpointerdown={beginGesture} oninput={pan} onchange={endGesture} ondblclick={() => commit(() => (getTrack(tr.id)!.pan = 0))} data-tip="{t('pan')}: {tr.pan === 0 ? 'C' : (tr.pan < 0 ? 'L' : 'R') + Math.round(Math.abs(tr.pan) * 100)}" />
     </div>
   {/if}
@@ -155,6 +175,26 @@
 </div>
 
 <style>
+  .busic {
+    flex: none;
+    display: flex;
+    color: var(--text-2);
+  }
+  .frz {
+    flex: none;
+    display: flex;
+    border: 0;
+    background: transparent;
+    color: #7dd3fc;
+    cursor: pointer;
+    padding: 0;
+  }
+  .grp {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
   .th {
     position: relative;
     display: flex;

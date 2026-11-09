@@ -5,7 +5,7 @@
   import { api } from "../lib/api";
   import { t } from "../lib/i18n.svelte";
   import { fmtTime } from "../lib/format";
-  import { S, P, app, ed, persist, projectLength, toast } from "../lib/store.svelte";
+  import { S, P, app, ed, persist, projectLength, toast, labelRegions } from "../lib/store.svelte";
 
   const ex = S.settings.export;
   let busy = $state(false);
@@ -64,7 +64,12 @@
     busy = true;
     app.job = { kind: "export", fraction: 0, label: "" };
     try {
-      if (app.exportMode === "tracks") {
+      if (app.exportMode === "labels") {
+        const dir = await openDialog({ directory: true });
+        if (typeof dir !== "string") return;
+        const files = await api.exportRegions(dir, project, labelRegions(), options());
+        toast(`${t("exported")}: ${files.length}`, "ok", { label: t("reveal"), run: () => revealItemInDir(files[0] ?? dir) });
+      } else if (app.exportMode === "tracks") {
         const dir = await openDialog({ directory: true });
         if (typeof dir !== "string") return;
         const files = await api.exportTracks(dir, project, options());
@@ -99,6 +104,7 @@
           <button class:on={app.exportMode === "selection"} disabled={!ed.sel} onclick={() => (app.exportMode = "selection")}>{t("exportSel")}</button>
           <button class:on={app.exportMode === "loop"} disabled={P.p.loop.end <= P.p.loop.start} onclick={() => (app.exportMode = "loop")}>{t("exportLoop")}</button>
           <button class:on={app.exportMode === "tracks"} onclick={() => (app.exportMode = "tracks")}>{t("exportSeparate")}</button>
+          <button class:on={app.exportMode === "labels"} disabled={!labelRegions().length} onclick={() => (app.exportMode = "labels")}>{t("exportByLabels")} ({labelRegions().length})</button>
         </div>
         <div class="label">{t("format")}</div>
         <div class="seg full">

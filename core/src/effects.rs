@@ -19,7 +19,7 @@ pub enum EffectSpec {
     #[serde(rename_all = "camelCase")]
     Filter { kind: FilterKind, freq: f32, q: f32, slope: usize },
     #[serde(rename_all = "camelCase")]
-    Compressor { threshold: f32, ratio: f32, attack: f32, release: f32, knee: f32, makeup: f32, mix: f32 },
+    Compressor { threshold: f32, ratio: f32, attack: f32, release: f32, knee: f32, makeup: f32, mix: f32, #[serde(default)] sidechain: u64 },
     #[serde(rename_all = "camelCase")]
     Limiter { ceiling: f32, release: f32, input: f32, lookahead: f32 },
     #[serde(rename_all = "camelCase")]
@@ -196,7 +196,7 @@ impl Proc {
         match (self, spec) {
             (Proc::Eq(p), EffectSpec::Eq { bands }) => p.set(bands),
             (Proc::Filter(p), EffectSpec::Filter { kind, freq, q, slope }) => p.set(*kind, *freq, *q, *slope),
-            (Proc::Comp(p), EffectSpec::Compressor { threshold, ratio, attack, release, knee, makeup, mix }) => {
+            (Proc::Comp(p), EffectSpec::Compressor { threshold, ratio, attack, release, knee, makeup, mix, .. }) => {
                 p.set(*threshold, *ratio, *attack, *release, *knee, *makeup, *mix)
             }
             (Proc::Lim(p), EffectSpec::Limiter { ceiling, release, input, lookahead }) => p.set(*ceiling, *release, *input, *lookahead),
@@ -319,11 +319,33 @@ impl Chain {
     }
 
     pub fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+        self.process_keyed(buf, n, &|_| None);
+    }
+
+    /// Like `process`, but compressors with a sidechain source detect on `key(source)`.
+    pub fn process_keyed<'k>(&mut self, buf: &mut [Vec<f32>], n: usize, key: &dyn Fn(u64) -> Option<&'k [Vec<f32>]>) {
         for s in self.slots.iter_mut() {
-            if s.on {
-                s.proc.get().process(buf, n);
+            if !s.on {
+                continue;
+            }
+            match (&mut s.proc, &s.spec) {
+                (Proc::Comp(c), EffectSpec::Compressor { sidechain, .. }) if *sidechain != 0 => {
+                    // a missing key (track deleted) falls back to the compressor's own input
+                    let k = key(*sidechain);
+                    c.process_keyed(buf, k, n)
+                }
+                (p, _) => p.get().process(buf, n),
             }
         }
+    }
+
+    /// Track ids used as sidechain keys by this chain.
+    pub fn keys(&self) -> Vec<u64> {
+        self.slots
+            .iter()
+            .filter(|s| s.on)
+            .filter_map(|s| if let EffectSpec::Compressor { sidechain, .. } = s.spec { (sidechain != 0).then_some(sidechain) } else { None })
+            .collect()
     }
 
     pub fn reset(&mut self) {

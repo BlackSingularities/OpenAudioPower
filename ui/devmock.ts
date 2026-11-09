@@ -107,6 +107,16 @@ export function installDevMock() {
       return { sources: [s], errors: [] };
     },
     clear_sources: () => null,
+    generate_source: (a) => {
+      const s = { ...mkSource(2000 + sources.length, a.name, a.seconds), kind: "generated" };
+      sources.push(s);
+      return s;
+    },
+    bounce: (a) => {
+      const s = { ...mkSource(3000 + sources.length, a.name, 30), kind: "bounce" };
+      sources.push(s);
+      return s;
+    },
     "plugin:dialog|open": (a) => (a.options?.multiple ? ["C:\\Music\\song.mp3"] : "C:\\Music\\song.mp3"),
     separate_source: (a) => {
       const parent = sources.find((s) => s.id === a.id)!;

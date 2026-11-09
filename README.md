@@ -3,14 +3,18 @@
 Studio do nagrywania, edycji, przetwarzania i separacji dźwięku dla Windows (Rust + Tauri 2 + Svelte 5).
 
 ## Funkcje
-- **Wielościeżkowa oś czasu**: klipy, przycinanie, przenoszenie między ścieżkami, narastanie i wygaszanie, dzielenie, kopiowanie, duplikowanie, znaczniki, pętla, siatka (sekundy / takty), cofanie i ponawianie.
-- **Nagrywanie** z dowolnego wejścia (WASAPI), metronom, podgląd poziomu na żywo.
+- **Wielościeżkowa oś czasu**: klipy, przycinanie, przenoszenie między ścieżkami, narastanie i wygaszanie, automatyczny crossfade nachodzących klipów, dzielenie, kopiowanie, duplikowanie, pętla, siatka (sekundy / takty), cofanie i ponawianie z listą historii (Ctrl+H).
+- **Mikser jak w DAW**: szyny (Ctrl+Shift+T), wyjście ścieżki na szynę, wysyłki pre/post (np. jeden wspólny pogłos), sidechain w kompresorze (ściszanie muzyki pod głosem), grupy ścieżek ze wspólnym suwakiem, wyciszeniem i solo, solo podążające za routingiem, kompensacja opóźnień wtyczek przy odtwarzaniu i eksporcie, zamrażanie ścieżek.
+- **Etykiety** jak w Audacity: punkty i zakresy z opisem (Ctrl+L), lista etykiet, import i eksport plików etykiet Audacity (.txt), eksport wielu plików według etykiet.
+- **Ołówek** (P): rysowanie pojedynczych próbek po przybliżeniu, np. do ręcznego usunięcia trzasku.
+- **Generatory** (Ctrl+Shift+G): ton (sinus, prostokąt, piła, trójkąt), przemiatanie, szum biały / różowy / brązowy, DTMF, ścieżka klików, cisza.
+- **Nagrywanie** z dowolnego wejścia (WASAPI), metronom, podgląd poziomu na żywo, punch-in w zakresie pętli z odtwarzaniem wstępnym, nagrywanie z timerem (start o godzinie lub za N minut, określony czas).
 - **Import**: MP3, FLAC, WAV, OGG/Vorbis, M4A/AAC, ALAC, AIFF, CAF, MKV/WebM.
 - **Separacja ścieżek**: HT-Demucs (6 ścieżek: wokal, perkusja, bas, gitara, pianino, reszta albo 4 ścieżki) przez ONNX Runtime, lokalnie. Modele (136–166 MB) są pobierane na żądanie. Jest też szybki tryb DSP, który nie wymaga pobierania.
 - **Efekty w czasie rzeczywistym** na ścieżkach i masterze: korektor parametryczny, tilt EQ, filtry (w tym analogowy ladder, auto-filtr / wah, formantowy, grzebieniowy), kompresor, kompresor trzypasmowy, limiter, clipper, bramka, de-esser, kształtowanie transjentów, pogłos, delay, poszerzenie Haasa, chorus, flanger, phaser, tremolo, vibrato, modulator pierścieniowy, saturacja, exciter, symulacja taśmy, bit crusher, narzędzie stereo, gotowe presety.
 - **Przetwarzanie**: normalizacja (szczyt / LUFS / RMS), wzmocnienie, redukcja szumu (z profilem), usuwanie trzasków, odbudowa przesterów, usuwanie przydźwięku sieci, tłumienie głosek wybuchowych, wyrównanie głośności (leveler), zmiana wysokości, rozciąganie w czasie, prędkość, odwracanie, usuwanie składowej stałej, mono/stereo i inne.
 - **Analiza**: EBU R128 (LUFS, LRA, true peak), RMS, korelacja, tempo (BPM), tonacja, spektrogram, analizator widma na żywo.
-- **Eksport**: WAV 16/24/32f, FLAC 16/24, MP3 (LAME), M4A/AAC (koder Windows), Ogg Vorbis i Opus; cały miks, zaznaczenie, pętla albo każda ścieżka osobno; normalizacja do streamingu, podcastu lub broadcastu.
+- **Eksport**: WAV 16/24/32f, FLAC 16/24, MP3 (LAME), M4A/AAC (koder Windows), Ogg Vorbis i Opus; cały miks, zaznaczenie, pętla, każda ścieżka osobno albo wiele plików według etykiet; normalizacja do streamingu, podcastu lub broadcastu.
 - **Automatyzacja** głośności i panoramy na każdej ścieżce: punkty rysowane na osi czasu, działają przy odtwarzaniu i eksporcie.
 - **Czysta mowa (AI)**: DeepFilterNet3 wbudowany w aplikację (bez pobierania, na procesorze) usuwa szum tła z nagrań głosu, a tłumienie późnego pogłosu zmniejsza echo pomieszczenia.
 - **Edytor spektralny** (Ctrl+Shift+R): zaznaczasz na spektrogramie kaszel, dzwonek albo pisk i wypełniasz to miejsce tłem albo tylko je wyciszasz.

@@ -394,13 +394,13 @@ pub async fn apply_op(h: AppHandle, id: u64, start: usize, end: usize, op: Op, n
 
 /// Mixes the project range down to a new source (bounce / freeze).
 #[tauri::command]
-pub async fn bounce(h: AppHandle, project: Project, start: i64, end: i64, name: String) -> R<SourceInfo> {
+pub async fn bounce(h: AppHandle, project: Project, start: i64, end: i64, name: String, tail: Option<f32>) -> R<SourceInfo> {
     let app = app_state(&h);
     let cancel = app.new_job();
     let emit = emitter(&h, "bounce");
     blocking(move || {
         let src = app.engine.sources();
-        let buf = mix::render_range(&project, &src, app.rate(), start, end, 0.0, &|f| emit(f, ""), &cancel);
+        let buf = mix::render_range(&project, &src, app.rate(), start, end, tail.unwrap_or(0.0), &|f| emit(f, ""), &cancel);
         emit(1.0, "");
         if cancel.is_set() {
             return Err("cancelled".into());
@@ -610,14 +610,15 @@ pub async fn export_tracks(h: AppHandle, dir: String, project: Project, options:
             if cancel.is_set() {
                 return Err("cancelled".into());
             }
+            // solo follows the routing: a track keeps the buses it feeds, a bus its sources
             let mut single = project.clone();
             single.master = Default::default();
-            single.tracks = vec![{
-                let mut t = t.clone();
-                t.mute = false;
-                t.solo = false;
-                t
-            }];
+            for x in single.tracks.iter_mut() {
+                x.solo = x.id == t.id;
+                if x.id == t.id {
+                    x.mute = false;
+                }
+            }
             let buf = mix::render_range(&single, &src, app.rate(), options.start, end, options.tail, &|_| {}, &cancel);
             let buf = finish(buf, &options);
             let ext = options.enc.format.ext();
@@ -630,6 +631,63 @@ pub async fn export_tracks(h: AppHandle, dir: String, project: Project, options:
         Ok(written)
     })
     .await
+}
+
+/// One named part of the timeline for "export multiple" (label regions).
+#[derive(Deserialize)]
+pub struct Region {
+    name: String,
+    start: i64,
+    end: i64,
+}
+
+/// Each region rendered from the whole mix into its own file, numbered in order.
+#[tauri::command]
+pub async fn export_regions(h: AppHandle, dir: String, project: Project, regions: Vec<Region>, options: ExportOptions) -> R<Vec<String>> {
+    let app = app_state(&h);
+    let cancel = app.new_job();
+    let emit = emitter(&h, "export");
+    blocking(move || {
+        let src = app.engine.sources();
+        let mut written = Vec::new();
+        let k = regions.len().max(1);
+        for (i, r) in regions.iter().enumerate() {
+            if cancel.is_set() {
+                return Err("cancelled".into());
+            }
+            if r.end <= r.start {
+                continue;
+            }
+            let buf = mix::render_range(&project, &src, app.rate(), r.start, r.end, options.tail, &|_| {}, &cancel);
+            let buf = finish(buf, &options);
+            let ext = options.enc.format.ext();
+            let safe: String = r.name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+            let p = Path::new(&dir).join(format!("{:02} {}.{ext}", i + 1, if safe.trim().is_empty() { "part".into() } else { safe.trim().to_string() }));
+            encode::write(&p, &buf, &options.enc)?;
+            written.push(p.to_string_lossy().into_owned());
+            emit((i + 1) as f32 / k as f32, &r.name);
+        }
+        Ok(written)
+    })
+    .await
+}
+
+/// New source from a signal generator (tone, noise, sweep, DTMF, clicks, silence).
+#[tauri::command]
+pub fn generate_source(app: State<'_, Arc<App>>, spec: openaudiopower_core::generate::Gen, seconds: f32, stereo: bool, name: String) -> SourceInfo {
+    let buf = openaudiopower_core::generate::generate(&spec, app.rate(), seconds, if stereo { 2 } else { 1 });
+    app.add(NewSource { name, path: None, kind: "generated", parent: None, stem: None, meta: Meta::default(), buf })
+}
+
+/// Plain text files picked by the user (label import / export).
+#[tauri::command]
+pub fn read_text_file(path: String) -> R<String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn write_text_file(path: String, text: String) -> R<()> {
+    std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

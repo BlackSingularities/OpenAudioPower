@@ -47,14 +47,16 @@ impl Compressor {
     }
 }
 
-impl Processor for Compressor {
-    fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+impl Compressor {
+    /// Compresses `buf` while detecting the level on `key` (sidechain) instead of `buf`.
+    pub fn process_keyed(&mut self, buf: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, n: usize) {
         let mk = db_to_gain(self.makeup);
         let mut max_gr = 0.0f32;
         for i in 0..n {
             let mut peak = 0.0f32;
-            for ch in buf.iter() {
-                peak = peak.max(ch[i].abs());
+            match key {
+                Some(k) => k.iter().for_each(|ch| peak = peak.max(ch.get(i).copied().unwrap_or(0.0).abs())),
+                None => buf.iter().for_each(|ch| peak = peak.max(ch[i].abs())),
             }
             let x = gain_to_db(peak);
             let want = x - self.curve(x); // gain reduction (positive dB)
@@ -68,6 +70,12 @@ impl Processor for Compressor {
             }
         }
         self.gr = max_gr.max(0.0);
+    }
+}
+
+impl Processor for Compressor {
+    fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+        self.process_keyed(buf, None, n);
     }
     fn reset(&mut self) {
         self.env_db = 0.0;

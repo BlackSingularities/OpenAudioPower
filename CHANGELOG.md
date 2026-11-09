@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0
+
+Mikser:
+- Szyny: ścieżka może grać na szynę zamiast na master, a wysyłki (przed albo za suwakiem) dokładają jej sygnał do dowolnej szyny – np. jeden pogłos dla kilku ścieżek („Wysyłka na nowy pogłos”). Pętle sygnału są blokowane.
+- Sidechain w kompresorze: kompresor reaguje na inną ścieżkę, np. muzyka ścisza się, gdy mówi lektor. Ścieżka-klucz może być wyciszona.
+- Grupy ścieżek: wspólny suwak (o tyle samo dB), wyciszenie i solo.
+- Solo podąża za routingiem: solo ścieżki zostawia szyny, do których gra, a solo szyny – ścieżki, które ją zasilają.
+- Kompensacja opóźnień wtyczek (np. look-ahead limitera) także przy odtwarzaniu, z uwzględnieniem szyn i wysyłek.
+- Zamrażanie ścieżki: klipy z efektami są renderowane do jednego nagrania, które gra zamiast nich i nie obciąża procesora.
+
+Edycja:
+- Nachodzące na siebie klipy na jednej ścieżce przechodzą jeden w drugi (crossfade o stałej mocy) zamiast się sumować.
+- Ołówek (P): rysowanie pojedynczych próbek po przybliżeniu osi czasu.
+- Generator sygnału (Ctrl+Shift+G): ton, przemiatanie, szum biały / różowy / brązowy, DTMF, ścieżka klików, cisza.
+- Etykiety: punkty i zakresy z opisem (Ctrl+L, lista Ctrl+Shift+L), import i eksport plików etykiet Audacity, eksport wielu plików według etykiet.
+- Historia zmian (Ctrl+H) z nazwami kroków; kliknięcie kroku przenosi do stanu po nim.
+- Punch-in: nagrywanie tylko w zakresie pętli, z kilkusekundowym odtwarzaniem wstępnym i samoczynnym końcem. Nagrywanie z timerem: start o godzinie albo za N minut, przez określony czas.
+
 ## 1.2.0
 
 - 13 nowych efektów w czasie rzeczywistym. Filtry: analogowy ladder (dolno-, pasmowo- i górnoprzepustowy z rezonansem i nasyceniem), automatyczny / wah (LFO albo obwiednia), formantowy z płynną zmianą samogłosek, tilt EQ, grzebieniowy. Dynamika: kompresor trzypasmowy, kształtowanie transjentów, clipper. Barwa: exciter, symulacja taśmy (wow, flutter, szum). Modulacja: modulator pierścieniowy, vibrato. Przestrzeń: poszerzenie Haasa.

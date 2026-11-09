@@ -59,6 +59,9 @@
     <span class="sep"></span>
     <button class="tbtn" class:on2={P.p.loop.on} onclick={toggleLoop} data-tip="{t('loop')} (L)"><Icon name="loop" size={16} /></button>
     <button class="tbtn" class:on2={tp.metronome} onclick={() => setMetronome(!tp.metronome)} data-tip="{t('metronome')} (K)"><Icon name="metronome" size={16} /></button>
+    <button class="tbtn punch" class:on2={S.settings.punch} class:timer={!!app.timerRec} onclick={() => (app.dialogs.timer = true)} oncontextmenu={(e) => (e.preventDefault(), (S.settings.punch = !S.settings.punch), persist())} data-tip={t("recOptionsTip")}>
+      {#if app.timerRec}<Icon name="clock" size={15} />{:else}<span class="pi">PI</span>{/if}
+    </button>
   </div>
 
     <span class="vsep" aria-hidden="true"></span>
@@ -163,6 +166,13 @@
     justify-content: center;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  }
+  .tbtn.punch .pi {
+    font: 700 10px var(--mono);
+    letter-spacing: 0.04em;
+  }
+  .tbtn.timer {
+    color: #f87171;
   }
   .tbtn:hover {
     background: var(--glass-3);

@@ -4,7 +4,7 @@
   import ParamEditor from "./ParamEditor.svelte";
   import { lang, t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
-  import { EFFECTS, GROUPS, PRESETS, effectDef } from "../lib/effects";
+  import { EFFECTS, GROUPS, PRESETS, effectDef, type Param } from "../lib/effects";
   import { P, tp, app, commit, addEffect, applyPreset, openPluginEditor, restartPlugin, track as getTrack, type Track, type FxSlot } from "../lib/store.svelte";
   import { api } from "../lib/api";
 
@@ -44,7 +44,7 @@
   function set(slot: FxSlot, key: string, v: any) {
     commit(() => {
       const s = list().find((x) => x.id === slot.id);
-      if (s) s.spec[key] = v;
+      if (s) s.spec[key] = key === "sidechain" ? +v : v;
     }, { merge: `fx${slot.id}:${key}` });
   }
 
@@ -78,6 +78,22 @@
     });
   }
 
+  /** Compressor gets a sidechain picker with the project's other tracks. */
+  function paramsOf(def: NonNullable<ReturnType<typeof effectDef>>): Param[] {
+    if (def.type !== "compressor") return def.params;
+    const others = P.p.tracks.filter((x) => x.id !== target?.id);
+    return [
+      ...def.params,
+      {
+        key: "sidechain",
+        label: ["Sidechain – reaguj na ścieżkę", "Sidechain – react to track"],
+        kind: "select",
+        options: [{ value: "0", label: ["Brak (własny sygnał)", "None (own signal)"] as L2 }, ...others.map((x) => ({ value: String(x.id), label: [x.name, x.name] as L2 }))],
+      },
+    ];
+  }
+  type L2 = [string, string];
+
   const gr = $derived(target ? (tp.meters[target.id]?.gr ?? 0) : tp.masterGr);
 </script>
 
@@ -89,6 +105,9 @@
     <button class="hb" onclick={presetMenu} data-tip={t("presets")}><Icon name="sparkles" size={13} />{t("presets")}</button>
     <button class="hb add" onclick={addMenu} data-tip={t("addEffect")}><Icon name="plus" size={13} />{t("addShort")}</button>
   </div>
+  {#if target?.freeze}
+    <div class="frozen"><Icon name="snow" size={13} />{t("frozenHint")}</div>
+  {/if}
   {#if !slots.length}
     <div class="empty">{t("noEffects")}</div>
   {/if}
@@ -121,7 +140,7 @@
       {/if}
       {#if open[slot.id] && def}
         <div class="sb">
-          <ParamEditor params={def.params} values={slot.spec} defaults={def.defaults} onchange={(k, v) => set(slot, k, v)} />
+          <ParamEditor params={paramsOf(def)} values={{ sidechain: 0, ...slot.spec }} defaults={def.defaults} onchange={(k, v) => set(slot, k, v)} />
         </div>
       {/if}
     </div>
@@ -129,6 +148,17 @@
 </div>
 
 <style>
+  .frozen {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(125, 211, 252, 0.1);
+    color: #7dd3fc;
+    font-size: 11.5px;
+  }
   .chain {
     display: flex;
     flex-direction: column;

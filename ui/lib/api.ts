@@ -14,7 +14,7 @@ export interface SourceInfo {
   id: number;
   name: string;
   path: string | null;
-  kind: "file" | "recording" | "stem" | "edit" | "bounce";
+  kind: "file" | "recording" | "stem" | "edit" | "bounce" | "generated";
   parent: number | null;
   stem: string | null;
   rate: number;
@@ -183,7 +183,7 @@ export const api = {
   recordStop: (name: string) => invoke<{ source: SourceInfo; start: number } | null>("record_stop", { name }),
   applyOp: (id: number, start: number, end: number, op: unknown, name?: string) =>
     invoke<SourceInfo>("apply_op", { id, start: Math.max(0, Math.round(start)), end: Math.max(0, Math.round(end)), op, name: name ?? null }),
-  bounce: (project: unknown, start: number, end: number, name: string) => invoke<SourceInfo>("bounce", { project, start, end, name }),
+  bounce: (project: unknown, start: number, end: number, name: string, tail = 0) => invoke<SourceInfo>("bounce", { project, start, end, name, tail }),
   analyze: (id: number, start = 0, end = 0) => invoke<Analysis>("analyze", { id, start: Math.round(start), end: Math.round(end) }),
   async spectrogram(id: number, start: number, end: number, width: number, height: number): Promise<Uint8Array> {
     const b = await invoke<ArrayBuffer>("spectrogram", { id, start: Math.round(start), end: Math.round(end), width, height });
@@ -197,6 +197,10 @@ export const api = {
     invoke<{ stems: SourceInfo[]; device: string; seconds: number }>("separate_source", { id, start: Math.round(start), end: Math.round(end), options, keep }),
   exportMix: (path: string, project: unknown, options: unknown) => invoke<void>("export_mix", { path, project, options }),
   exportTracks: (dir: string, project: unknown, options: unknown) => invoke<string[]>("export_tracks", { dir, project, options }),
+  exportRegions: (dir: string, project: unknown, regions: { name: string; start: number; end: number }[], options: unknown) => invoke<string[]>("export_regions", { dir, project, regions, options }),
+  generateSource: (spec: unknown, seconds: number, stereo: boolean, name: string) => invoke<SourceInfo>("generate_source", { spec, seconds, stereo, name }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  writeTextFile: (path: string, text: string) => invoke<void>("write_text_file", { path, text }),
   exportSource: (id: number, path: string, options: unknown) => invoke<void>("export_source", { id, path, options }),
   pluginDirs: () => invoke<string[]>("plugin_dirs"),
   pluginScan: (dirs: string[], full: boolean) => invoke<PluginScanEntry[]>("plugin_scan", { dirs, full }),

@@ -18,6 +18,10 @@
   import PluginBrowser from "./components/PluginBrowser.svelte";
   import SettingsDialog from "./components/SettingsDialog.svelte";
   import InfoDialogs from "./components/InfoDialogs.svelte";
+  import GenerateDialog from "./components/GenerateDialog.svelte";
+  import LabelsDialog from "./components/LabelsDialog.svelte";
+  import HistoryDialog from "./components/HistoryDialog.svelte";
+  import TimerDialog from "./components/TimerDialog.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import Tooltip from "./components/Tooltip.svelte";
@@ -32,8 +36,7 @@
     cancelJob, separateCmd,
     openSpectral,
     openRemix,
-    karaoke,
-  } from "./lib/store.svelte";
+    karaoke, addLabel, addBusCmd } from "./lib/store.svelte";
 
   let updHidden = $state(false);
   let allowClose = false;
@@ -141,6 +144,11 @@
       if (k === "z" && !e.shiftKey) return run(undo);
       if (k === "y" || (k === "z" && e.shiftKey)) return run(redo);
       if (k === "s") return run(() => saveProject(e.shiftKey));
+      if (k === "l" && e.shiftKey) return run(() => (app.dialogs.labels = true));
+      if (k === "l") return run(() => addLabel());
+      if (k === "g" && e.shiftKey) return run(() => (app.dialogs.generate = true));
+      if (k === "h") return run(() => (app.dialogs.history = true));
+      if (k === "t" && e.shiftKey) return run(() => addBusCmd());
       if (k === "o") return run(() => openProject());
       if (k === "n") return run(newProject);
       if (k === "i") return run(pickImport);
@@ -205,6 +213,8 @@
         return run(() => ((S.settings.snap = !S.settings.snap), persist()));
       case "f":
         return run(() => ((S.settings.follow = !S.settings.follow), persist()));
+      case "p":
+        return run(() => (ed.tool = ed.tool === "pencil" ? "select" : "pencil"));
     }
   }
 
@@ -391,6 +401,10 @@
 <PluginBrowser />
 <SettingsDialog />
 <InfoDialogs />
+<GenerateDialog />
+<LabelsDialog />
+<HistoryDialog />
+<TimerDialog />
 <UpdateBanner bind:hidden={updHidden} />
 <ContextMenu />
 <Tooltip />

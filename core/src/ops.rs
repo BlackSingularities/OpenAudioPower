@@ -59,6 +59,8 @@ pub enum Op {
     #[serde(rename_all = "camelCase")]
     TrimSilence { threshold: f32 },
     Declick { strength: f32 },
+    /// Pencil: replaces the range with these sample values (all channels).
+    Draw { values: Vec<f32> },
     #[serde(rename_all = "camelCase")]
     Declip { tolerance: f32, #[serde(default)] gain: f32 },
     #[serde(rename_all = "camelCase")]
@@ -283,6 +285,15 @@ pub fn apply(src: &AudioBuffer, start: usize, end: usize, op: &Op, cancel: &Canc
         Op::Declick { strength } => {
             let mut p = part;
             declick(&mut p, *strength);
+            p
+        }
+        Op::Draw { values } => {
+            let mut p = part;
+            for c in p.ch.iter_mut() {
+                for (x, v) in c.iter_mut().zip(values.iter()) {
+                    *x = v.clamp(-4.0, 4.0);
+                }
+            }
             p
         }
         Op::Declip { tolerance, gain } => {

@@ -70,6 +70,15 @@
     bass: '<path d="M14 3l7 7-3 1-6 6a3 3 0 1 1-4-4l6-6z"/><path d="M8 16l-1 1"/>',
     guitar: '<path d="M19 2l3 3-4.5 4.5"/><path d="M14 7.5 16.5 10"/><path d="M11 10a4 4 0 0 0-5.5 0C3 12.5 2 17 4.5 19.5S11.5 21 14 18.5a4 4 0 0 0 0-5.5z"/><circle cx="9" cy="15" r="1.5"/>',
     piano: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16M12 4v16M16 4v16"/><path d="M7 4v8h2V4M15 4v8h2V4" fill="currentColor"/>',
+    bus: '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="16" cy="12" r="1.6" fill="currentColor"/><circle cx="11" cy="18" r="1.6" fill="currentColor"/>',
+    send: '<path d="M5 19 19 5"/><path d="M9 5h10v10"/>',
+    snow: '<path d="M12 2v20M4.2 6.5l15.6 9M4.2 17.5l15.6-9"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+    tone: '<path d="M2 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0 2 3 2 3"/>',
+    label: '<path d="M3 5h11l6 7-6 7H3z"/><circle cx="8" cy="12" r="1.5" fill="currentColor"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     other: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/>',
   };
 </script>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import { menu, closeMenu, type MenuItem } from "../lib/menu.svelte";
+  import { labelNext } from "../lib/store.svelte";
 
   let el = $state<HTMLDivElement>();
   let subEl = $state<HTMLDivElement>();
@@ -36,8 +37,10 @@
     });
   }
 
-  function run(f?: () => void) {
+  function run(f?: () => void, label?: string) {
     closeMenu();
+    // the history list names the step after the menu item that made it
+    if (label) labelNext(label.replace(/^[✓ ]+/, "").replace(/…$/, ""));
     f?.();
   }
 </script>
@@ -70,7 +73,7 @@
       disabled={it.disabled}
       role="menuitem"
       onpointerenter={() => top && (sub = null)}
-      onclick={() => run(it.run)}
+      onclick={() => run(it.run, it.label)}
     >
       <span class="ic">{#if it.icon}<Icon name={it.icon} size={15} />{/if}</span>
       <span class="lbl">{it.label}</span>

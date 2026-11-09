@@ -12,8 +12,7 @@
     removeTrack, separateCmd, addMarker, toggleLoop,
     openSpectral,
     openRemix,
-    karaoke,
-  } from "../lib/store.svelte";
+    karaoke, addLabel, addBusCmd, addReverbSend, freezeTrack, unfreezeTrack, track as trackOf } from "../lib/store.svelte";
 
   let { onUpdateCheck, onQuit }: { onUpdateCheck: () => void; onQuit: () => void } = $props();
 
@@ -63,6 +62,7 @@
       items: () => [
         { label: t("undo"), icon: "undo", hint: "Ctrl+Z", disabled: !hist.canUndo, run: undo },
         { label: t("redo"), icon: "redo", hint: "Ctrl+Y", disabled: !hist.canRedo, run: redo },
+        { label: t("historyTitle") + "…", icon: "history", hint: "Ctrl+H", run: () => (app.dialogs.history = true) },
         { sep: true },
         { label: t("cut"), icon: "scissors", hint: "Ctrl+X", disabled: !ed.selClips.length, run: () => copySelected(true) },
         { label: t("copy"), icon: "copy", hint: "Ctrl+C", disabled: !ed.selClips.length, run: () => copySelected() },
@@ -78,6 +78,10 @@
         { label: t("selectAll"), icon: "check", hint: "Ctrl+A", run: selectAll },
         { label: t("deselect"), icon: "x", hint: "Esc", run: () => ((ed.selClips = []), (ed.sel = null)) },
         { label: t("addMarker"), icon: "marker", hint: "M", run: addMarker },
+        { label: ed.sel ? t("addLabelSel") : t("addLabel"), icon: "label", hint: "Ctrl+L", run: () => addLabel() },
+        { label: t("labelsTitle") + "…", icon: "label", hint: "Ctrl+Shift+L", run: () => (app.dialogs.labels = true) },
+        { sep: true },
+        { label: (ed.tool === "pencil" ? "✓ " : "   ") + t("pencil"), icon: "pencil", hint: "P", run: () => (ed.tool = ed.tool === "pencil" ? "select" : "pencil") },
       ],
     },
     {
@@ -100,7 +104,14 @@
       id: "tracks",
       items: () => [
         { label: t("addTrack"), icon: "plus", hint: "Ctrl+T", run: addTrackCmd },
+        { label: t("addBus"), icon: "bus", hint: "Ctrl+Shift+T", run: () => addBusCmd() },
+        { label: t("reverbSend"), icon: "sparkles", disabled: !ed.selTrack || !!trackOf(ed.selTrack)?.bus, run: () => ed.selTrack && addReverbSend([ed.selTrack]) },
         { label: t("removeTrack"), icon: "trash", disabled: !ed.selTrack, run: () => ed.selTrack && removeTrack(ed.selTrack) },
+        { sep: true },
+        trackOf(ed.selTrack)?.freeze
+          ? { label: t("unfreeze"), icon: "snow", run: () => ed.selTrack && unfreezeTrack(ed.selTrack) }
+          : { label: t("freeze"), icon: "snow", disabled: !trackOf(ed.selTrack)?.clips.length || !!trackOf(ed.selTrack)?.bus, run: () => ed.selTrack && freezeTrack(ed.selTrack) },
+        { label: t("recOptions") + "…", icon: "clock", run: () => (app.dialogs.timer = true) },
         { sep: true },
         { label: t("loop"), icon: "loop", hint: "L", run: toggleLoop },
         { label: t("bounceRange"), icon: "bounce", run: bounceRange },
@@ -109,6 +120,8 @@
     {
       id: "tools",
       items: () => [
+        { label: t("generateTitle") + "…", icon: "tone", hint: "Ctrl+Shift+G", run: () => (app.dialogs.generate = true) },
+        { sep: true },
         { label: t("stemSeparation"), icon: "stems", hint: "Ctrl+Shift+E", run: separateCmd },
         { label: t("remixTitle") + "…", icon: "sliders", hint: "Ctrl+Shift+M", run: () => openRemix() },
         { label: t("remixKaraokeCmd"), icon: "mic", hint: "Ctrl+Shift+K", run: karaoke },

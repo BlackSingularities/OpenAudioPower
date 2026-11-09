@@ -54,11 +54,30 @@ export interface Track {
   clips: Clip[];
   /** missing in projects saved before automation existed */
   auto?: Automation;
+  /** bus: no clips, sums what other tracks route or send to it */
+  bus?: boolean;
+  /** bus id this track feeds instead of the master (0 = master) */
+  output?: number;
+  sends?: SendSlot[];
+  /** pre-rendered clips + effects played instead of them */
+  freeze?: { source: number; start: number } | null;
+  /** tracks sharing a group number move faders, mute and solo together (0 = none) */
+  group?: number;
 }
+export interface SendSlot {
+  id: number;
+  target: number;
+  gain: number;
+  pre: boolean;
+  on: boolean;
+}
+export const GROUP_COLORS = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#a855f7", "#ec4899"];
 export interface Marker {
   id: number;
   pos: number;
   name: string;
+  /** end of a region label (Audacity-style); absent for a point label */
+  end?: number;
 }
 export interface ProjectState {
   name: string;
@@ -94,6 +113,9 @@ const defaultSettings = () => ({
   metronome: { volume: 0.7, recOnly: false },
   snap: true,
   follow: true,
+  /** record only inside the loop range, with pre-roll */
+  punch: false,
+  preroll: 2,
   wave: { scale: "relative" as "relative" | "db" | "linear", style: "fill" as "fill" | "rms" | "bars" | "outline", color: "track" as "track" | "spectral" | "gradient" },
   timeMode: "time" as "time" | "bars",
   ui: { library: true, inspector: true, dock: "mixer" as "mixer" | "analyzer" | null, dockHeight: 230, libraryWidth: 270, inspectorWidth: 330, onboarded: false },
@@ -138,7 +160,9 @@ export const app = $state({
   sources: [] as SourceInfo[],
   job: null as Job | null,
   toasts: [] as Toast[],
-  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false },
+  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false, generate: false, labels: false, history: false, timer: false },
+  /** scheduled timer recording */
+  timerRec: null as null | { at: number; seconds: number },
   stemSource: null as { id: number; start: number; end: number; trackId: number | null; clipStart: number } | null,
   /** effect chain the plug-in browser adds to: a track id, or "master" */
   pluginTarget: null as null | number | "master",
@@ -150,7 +174,7 @@ export const app = $state({
   remix: null as null | { clip: number; track: number; song: number; orig: Record<number, number>; semis: number; withVocals: boolean },
   /** clip opened in the spectral editor */
   spectralClip: null as number | null,
-  exportMode: "mix" as "mix" | "loop" | "selection" | "tracks",
+  exportMode: "mix" as "mix" | "loop" | "selection" | "tracks" | "labels",
   path: "" as string,
   dirty: false,
   dragOver: false,
@@ -184,6 +208,8 @@ export const ed = $state({
   selClips: [] as number[],
   selTrack: null as number | null,
   inspectorTab: "clip" as "clip" | "track" | "process" | "analysis" | "master",
+  /** pencil draws samples when zoomed in far enough */
+  tool: "select" as "select" | "pencil",
   viewWidth: 1000,
 });
 
@@ -300,9 +326,35 @@ export function cancelJob() {
 
 // ───────────────────────────── history ─────────────────────────────
 
-const undoStack: string[] = [];
-const redoStack: string[] = [];
-export const hist = $state({ canUndo: false, canRedo: false });
+interface HistEntry {
+  /** project before the action */
+  json: string;
+  label: string;
+  at: number;
+}
+const undoStack: HistEntry[] = [];
+const redoStack: HistEntry[] = [];
+export const hist = $state({ canUndo: false, canRedo: false, /** labels for the history list */ done: [] as { label: string; at: number }[], undone: [] as { label: string; at: number }[] });
+
+/** Name for the next undo step (menus set it just before running their action). */
+let pendingLabel = "";
+export function labelNext(label: string) {
+  pendingLabel = label;
+  setTimeout(() => (pendingLabel = ""), 0);
+}
+function pushUndo(json: string, label?: string) {
+  undoStack.push({ json, label: label || pendingLabel || t("histEdit"), at: Date.now() });
+  pendingLabel = "";
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack.length = 0;
+  histSync();
+}
+function histSync() {
+  hist.canUndo = undoStack.length > 0;
+  hist.canRedo = redoStack.length > 0;
+  hist.done = undoStack.map((e) => ({ label: e.label, at: e.at }));
+  hist.undone = redoStack.map((e) => ({ label: e.label, at: e.at })).reverse();
+}
 
 function snapshot(): string {
   return JSON.stringify($state.snapshot(P.p));
@@ -321,19 +373,13 @@ export function syncEngine() {
 }
 
 /** Run a project mutation as one undoable step. */
-export function commit(f: () => void, opts: { merge?: string } = {}) {
+export function commit(f: () => void, opts: { merge?: string; label?: string } = {}) {
   const before = snapshot();
   f();
   const now = Date.now();
-  if (!(opts.merge && opts.merge === lastMerge.key && now - lastMerge.at < 1200)) {
-    undoStack.push(before);
-    if (undoStack.length > 200) undoStack.shift();
-    redoStack.length = 0;
-  }
+  if (!(opts.merge && opts.merge === lastMerge.key && now - lastMerge.at < 1200)) pushUndo(before, opts.label);
   lastMerge.key = opts.merge ?? "";
   lastMerge.at = now;
-  hist.canUndo = undoStack.length > 0;
-  hist.canRedo = false;
   app.dirty = true;
   syncEngine();
 }
@@ -341,16 +387,14 @@ const lastMerge = { key: "", at: 0 };
 
 // Continuous gestures (dragging clips, faders) mutate the project live and become one undo step.
 let gestureBefore: string | null = null;
-export function beginGesture() {
+let gestureLabel = "";
+export function beginGesture(label: unknown = "") {
   gestureBefore = snapshot();
+  gestureLabel = typeof label === "string" ? label : "";
 }
-export function endGesture() {
+export function endGesture(label: unknown = "") {
   if (gestureBefore !== null && gestureBefore !== snapshot()) {
-    undoStack.push(gestureBefore);
-    if (undoStack.length > 200) undoStack.shift();
-    redoStack.length = 0;
-    hist.canUndo = true;
-    hist.canRedo = false;
+    pushUndo(gestureBefore, (typeof label === "string" && label) || gestureLabel);
     app.dirty = true;
   }
   gestureBefore = null;
@@ -370,20 +414,23 @@ function restore(json: string) {
 export function undo() {
   const s = undoStack.pop();
   if (!s) return;
-  redoStack.push(snapshot());
-  restore(s);
-  hist.canUndo = undoStack.length > 0;
-  hist.canRedo = true;
+  redoStack.push({ json: snapshot(), label: s.label, at: s.at });
+  restore(s.json);
+  histSync();
   lastMerge.key = "";
 }
 export function redo() {
   const s = redoStack.pop();
   if (!s) return;
-  undoStack.push(snapshot());
-  restore(s);
-  hist.canUndo = true;
-  hist.canRedo = redoStack.length > 0;
+  undoStack.push({ json: snapshot(), label: s.label, at: s.at });
+  restore(s.json);
+  histSync();
   lastMerge.key = "";
+}
+/** Jump in history: `done` actions stay applied (0 = before everything). */
+export function historyGoto(done: number) {
+  while (undoStack.length > done && undoStack.length) undo();
+  while (undoStack.length < done && redoStack.length) redo();
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -474,7 +521,7 @@ export function addTrackCmd() {
   commit(() => {
     const tr = newTrack();
     ed.selTrack = tr.id;
-  });
+  }, { label: t("addTrack") });
 }
 
 export function removeTrack(id: number) {
@@ -482,7 +529,7 @@ export function removeTrack(id: number) {
     const i = P.p.tracks.findIndex((x) => x.id === id);
     if (i >= 0) P.p.tracks.splice(i, 1);
     if (ed.selTrack === id) ed.selTrack = null;
-  });
+  }, { label: t("removeTrack") });
 }
 
 export function addSourceToNewTrack(src: SourceInfo, start = 0, color?: string, name?: string) {
@@ -494,7 +541,7 @@ export function addSourceToNewTrack(src: SourceInfo, start = 0, color?: string, 
     tr.clips.push(c);
     ed.selTrack = tr.id;
     ed.selClips = [c.id];
-  });
+  }, { label: `${t("addTrack")}: ${name ?? src.name}` });
   return clipId;
 }
 
@@ -549,7 +596,11 @@ export async function pickImportFolder() {
 
 function usedSources(): number[] {
   const ids = new Set<number>();
-  const walk = (p: ProjectState) => p.tracks.forEach((tr) => tr.clips.forEach((c) => ids.add(c.source)));
+  const walk = (p: ProjectState) =>
+    p.tracks.forEach((tr) => {
+      tr.clips.forEach((c) => ids.add(c.source));
+      if (tr.freeze) ids.add(tr.freeze.source);
+    });
   walk(P.p);
   // keep library items too
   app.sources.forEach((s) => ids.add(s.id));
@@ -601,8 +652,12 @@ export async function openProject(path?: string) {
       c.fadeIn = Math.round(c.fadeIn * k);
       c.fadeOut = Math.round(c.fadeOut * k);
     }
-    st.markers.forEach((m) => (m.pos = Math.round(m.pos * k)));
+    st.markers.forEach((m) => {
+      m.pos = Math.round(m.pos * k);
+      if (m.end !== undefined) m.end = Math.round(m.end * k);
+    });
     for (const tr of st.tracks) for (const pt of [...(tr.auto?.volume ?? []), ...(tr.auto?.pan ?? [])]) pt.t = Math.round(pt.t * k);
+    for (const tr of st.tracks) tr.freeze = null;
     st.loop.start = Math.round(st.loop.start * k);
     st.loop.end = Math.round(st.loop.end * k);
   }
@@ -610,7 +665,7 @@ export async function openProject(path?: string) {
   bumpIds(st);
   undoStack.length = 0;
   redoStack.length = 0;
-  hist.canUndo = hist.canRedo = false;
+  histSync();
   ed.selClips = [];
   ed.sel = null;
   ed.selTrack = st.tracks[0]?.id ?? null;
@@ -635,7 +690,7 @@ export async function newProject() {
   app.pluginEditor = {};
   undoStack.length = 0;
   redoStack.length = 0;
-  hist.canUndo = hist.canRedo = false;
+  histSync();
   ed.selClips = [];
   ed.sel = null;
   ed.selTrack = null;
@@ -713,15 +768,54 @@ export async function startRecording() {
     });
   }
   tp.recPeaks = [];
+  const punch = punchRange();
+  if (punch) {
+    // the loop would wrap the take; play straight through from the pre-roll instead
+    api.transport({ cmd: "loop", start: P.p.loop.start, end: P.p.loop.end, on: false }).catch(() => {});
+    seek(Math.max(0, punch.start - Math.round(S.settings.preroll * app.rate)));
+  }
+  recPunch = punch;
   await api.recordStart(tp.pos);
   tp.recording = true;
   tp.playing = true;
+}
+
+/** In/out points for punch recording (the loop range) when punch is on. */
+export function punchRange(): { start: number; end: number } | null {
+  const l = P.p.loop;
+  return S.settings.punch && l.end > l.start ? { start: l.start, end: l.end } : null;
+}
+let recPunch: { start: number; end: number } | null = null;
+/** Recording also stops on its own (punch out, timer). */
+let recStopAt = 0;
+
+/** Starts a recording at a given time for a given length (seconds; 0 = until stopped). */
+export function scheduleRecording(at: number, seconds: number) {
+  cancelTimerRecording();
+  app.timerRec = { at, seconds };
+  const wait = Math.max(0, at - Date.now());
+  timerHandle = setTimeout(async () => {
+    timerHandle = 0;
+    await startRecording();
+    recStopAt = seconds > 0 ? Date.now() + seconds * 1000 : 0;
+    app.timerRec = null;
+  }, wait);
+}
+let timerHandle: any = 0;
+export function cancelTimerRecording() {
+  if (timerHandle) clearTimeout(timerHandle);
+  timerHandle = 0;
+  app.timerRec = null;
 }
 
 export async function stopRecording() {
   if (!tp.recording) return;
   tp.recording = false;
   tp.playing = false;
+  recStopAt = 0;
+  const punch = recPunch;
+  recPunch = null;
+  if (punch) syncEngine();
   const tr = P.p.tracks.find((x) => x.armed);
   const n = P.p.tracks.reduce((a, x) => a + x.clips.filter((c) => source(c.source)?.kind === "recording").length, 0);
   const name = `${t("recording")} ${n + 1}`;
@@ -732,10 +826,21 @@ export async function stopRecording() {
   commit(() => {
     const target = (tr && track(tr.id)) ?? newTrack(t("recording"), "#ef4444");
     const c = makeClip(take.source, take.start);
+    if (punch) {
+      // keep only what was recorded between the punch points, with short fades
+      const a = Math.max(punch.start, c.start);
+      const b = Math.min(punch.end, c.start + c.len);
+      if (b > a) {
+        c.offset += a - c.start;
+        c.start = a;
+        c.len = b - a;
+        c.fadeIn = c.fadeOut = Math.min(Math.round(app.rate * 0.005), Math.floor(c.len / 2));
+      }
+    }
     target.clips.push(c);
     ed.selClips = [c.id];
     ed.selTrack = target.id;
-  });
+  }, { label: t("recording") });
 }
 
 // ───────────────────────────── view ─────────────────────────────
@@ -884,7 +989,84 @@ export function addMarker() {
   commit(() => {
     P.p.markers.push({ id: uid(), pos: tp.pos, name: `${P.p.markers.length + 1}` });
     P.p.markers.sort((a, b) => a.pos - b.pos);
-  });
+  }, { label: t("addMarker") });
+}
+
+/** Region label over the selection (or a point label at the playhead). */
+export function addLabel(name?: string) {
+  commit(() => {
+    const n = name ?? `${t("label")} ${P.p.markers.length + 1}`;
+    if (ed.sel && ed.sel.end > ed.sel.start) P.p.markers.push({ id: uid(), pos: ed.sel.start, end: ed.sel.end, name: n });
+    else P.p.markers.push({ id: uid(), pos: tp.pos, name: n });
+    P.p.markers.sort((a, b) => a.pos - b.pos);
+  }, { label: t("addLabel") });
+  app.dialogs.labels = true;
+}
+
+/** Parts for "export multiple": region labels as they are, otherwise the spans between point labels. */
+export function labelRegions(): { name: string; start: number; end: number }[] {
+  const ms = [...P.p.markers].sort((a, b) => a.pos - b.pos);
+  const regions = ms.filter((m) => m.end !== undefined && m.end > m.pos).map((m) => ({ name: m.name, start: m.pos, end: m.end! }));
+  if (regions.length) return regions;
+  const end = projectLength();
+  const cuts = ms.filter((m) => m.pos > 0 && m.pos < end);
+  if (!cuts.length) return [];
+  const pts = [0, ...cuts.map((m) => m.pos), end];
+  return pts.slice(0, -1).map((a, i) => ({ name: i === 0 ? (P.p.name || t("label")) + " 1" : cuts[i - 1].name, start: a, end: pts[i + 1] }));
+}
+
+/** Audacity label file: start, end (seconds) and text, tab-separated. */
+export function labelsToText(): string {
+  const r = app.rate;
+  return P.p.markers.map((m) => `${(m.pos / r).toFixed(6)}\t${((m.end ?? m.pos) / r).toFixed(6)}\t${m.name}`).join("\n") + "\n";
+}
+export function labelsFromText(text: string): number {
+  const r = app.rate;
+  const add: Marker[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    // lines starting with a backslash carry spectral ranges in Audacity files
+    if (!line.trim() || line.startsWith("\\")) continue;
+    const [a, b, ...rest] = line.split("\t");
+    const s = parseFloat(a);
+    const e = parseFloat(b);
+    if (!isFinite(s)) continue;
+    const m: Marker = { id: uid(), pos: Math.round(s * r), name: rest.join("\t").trim() || `${add.length + 1}` };
+    if (isFinite(e) && e > s) m.end = Math.round(e * r);
+    add.push(m);
+  }
+  if (add.length)
+    commit(() => {
+      P.p.markers.push(...add);
+      P.p.markers.sort((x, y) => x.pos - y.pos);
+    }, { label: t("labelsImport") });
+  return add.length;
+}
+
+// ───────────────────────────── generators ─────────────────────────────
+
+/** Generates a signal and places it at the playhead: on the selected track if it is free there, otherwise on a new track. */
+export async function insertGenerated(spec: any, seconds: number, stereo: boolean, name: string) {
+  const src = await api.generateSource(spec, seconds, stereo, name).catch((e) => (toast(`${t("error")}: ${e}`, "error"), null));
+  if (!src) return;
+  addSources([src]);
+  const at = ed.sel ? ed.sel.start : tp.pos;
+  const tr = track(ed.selTrack);
+  const free = tr && !tr.bus && !tr.freeze && !tr.clips.some((c) => c.start < at + src.frames && c.start + c.len > at);
+  commit(() => {
+    const target = free ? track(tr!.id)! : newTrack(name, "#22d3ee");
+    const c = makeClip(src, at);
+    target.clips.push(c);
+    ed.selClips = [c.id];
+    ed.selTrack = target.id;
+  }, { label: t("generate") + ": " + name });
+}
+
+// ───────────────────────────── pencil ─────────────────────────────
+
+/** Writes drawn samples into a clip's source (new version of the source, undoable). */
+export async function drawSamples(clipId: number, srcStart: number, values: Float32Array) {
+  labelNext(t("pencil"));
+  await applyOpToClip(clipId, srcStart, srcStart + values.length, { op: "draw", values: Array.from(values) });
 }
 
 /** Clips that the Process tab acts on, with the source range for each. */
@@ -1265,7 +1447,122 @@ export function tracksOfSource(id: number): Track[] {
   );
 }
 
+/** The ids plus every track sharing a group with one of them. */
+export function withGroups(ids: number[]): number[] {
+  const groups = new Set(P.p.tracks.filter((x) => ids.includes(x.id) && x.group).map((x) => x.group));
+  return P.p.tracks.filter((x) => ids.includes(x.id) || (x.group && groups.has(x.group))).map((x) => x.id);
+}
+
+/** Moves a fader; grouped tracks follow by the same amount of dB. Call inside a gesture or commit. */
+export function setGainLinked(id: number, v: number) {
+  const tr = track(id);
+  if (!tr) return;
+  const d = v - tr.gain;
+  for (const x of P.p.tracks) if (x.id === id || (tr.group && x.group === tr.group)) x.gain = Math.max(-60, Math.min(12, x.id === id ? v : x.gain + d));
+  syncEngine();
+}
+
+export function buses(): Track[] {
+  return P.p.tracks.filter((x) => x.bus);
+}
+
+export function addBusCmd(name?: string): number {
+  let id = 0;
+  commit(() => {
+    const tr = newTrack(name ?? `${t("bus")} ${buses().length + 1}`, "#64748b");
+    tr.bus = true;
+    tr.height = 64;
+    id = tr.id;
+    ed.selTrack = tr.id;
+  }, { label: t("addBus") });
+  return id;
+}
+
+/** Would routing `from` into bus `to` close a loop? */
+export function routesInto(from: number, to: number): boolean {
+  const seen = new Set<number>();
+  const walk = (id: number): boolean => {
+    if (id === from) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const tr = track(id);
+    if (!tr) return false;
+    return (!!tr.output && walk(tr.output)) || (tr.sends ?? []).some((s) => s.on && walk(s.target));
+  };
+  return walk(to);
+}
+
+export function setOutput(id: number, bus: number) {
+  if (bus && routesInto(id, bus)) return toast(t("routeLoop"), "error");
+  commit(() => (track(id)!.output = bus), { label: `${t("output")}: ${bus ? track(bus)?.name : t("master")}` });
+}
+
+export function addSend(id: number, bus: number) {
+  if (routesInto(id, bus)) return toast(t("routeLoop"), "error");
+  commit(() => {
+    const tr = track(id)!;
+    (tr.sends ??= []).push({ id: uid(), target: bus, gain: -6, pre: false, on: true });
+  }, { label: `${t("send")}: ${track(bus)?.name ?? ""}` });
+}
+
+export function removeSend(id: number, sendId: number) {
+  commit(() => {
+    const tr = track(id)!;
+    tr.sends = (tr.sends ?? []).filter((s) => s.id !== sendId);
+  }, { label: t("remove") + ": " + t("send").toLowerCase() });
+}
+
+/** New bus with a reverb, fed by a send from each given track. */
+export function addReverbSend(ids: number[]) {
+  let bus = 0;
+  commit(() => {
+    const n = buses().filter((b) => b.name.startsWith(t("reverb"))).length;
+    const tr = newTrack(n ? `${t("reverb")} ${n + 1}` : t("reverb"), "#64748b");
+    tr.bus = true;
+    tr.height = 64;
+    tr.effects.push({ id: uid(), on: true, spec: { type: "reverb", room: 0.7, damping: 0.45, wet: 1, dry: 0, width: 1, predelay: 20, lowcut: 200 } });
+    bus = tr.id;
+    for (const id of ids) {
+      const x = track(id);
+      if (x && !x.bus) (x.sends ??= []).push({ id: uid(), target: bus, gain: -12, pre: false, on: true });
+    }
+  }, { label: t("reverbSend") });
+}
+
+export function setGroup(ids: number[], group: number) {
+  commit(() => P.p.tracks.forEach((x) => ids.includes(x.id) && (x.group = group)));
+}
+
+export function nextGroup(): number {
+  const used = new Set(P.p.tracks.map((x) => x.group ?? 0));
+  let g = 1;
+  while (used.has(g)) g++;
+  return g;
+}
+
+/** Renders a track with its effects to a new source and plays that instead (saves CPU). */
+export async function freezeTrack(id: number) {
+  const tr = track(id);
+  if (!tr || tr.bus || !tr.clips.length) return;
+  const end = Math.max(...tr.clips.map((c) => c.start + c.len));
+  const solo = { ...$state.snapshot(tr), gain: 0, pan: 0, mute: false, solo: true, output: 0, sends: [], freeze: null, auto: { show: "off", volume: [], pan: [] } };
+  const keys = new Set<number>(tr.effects.filter((e) => e.on && e.spec.sidechain).map((e) => e.spec.sidechain));
+  // sidechain sources must exist in the render, but stay silent
+  const others = P.p.tracks.filter((x) => keys.has(x.id)).map((x) => ({ ...$state.snapshot(x), mute: true, solo: false, sends: [], output: 0 }));
+  const tail = tr.effects.some((e) => e.on) ? 4 : 0;
+  const src = await job("freeze", () => api.bounce({ tracks: [solo, ...others], master: { gain: 0, effects: [] } }, 0, end, `${tr.name} (${t("frozen").toLowerCase()})`, tail));
+  if (!src) return;
+  addSources([src]);
+  commit(() => (track(id)!.freeze = { source: src.id, start: 0 }), { label: t("freeze") });
+  toast(t("frozenOk"), "ok");
+}
+
+export function unfreezeTrack(id: number) {
+  commit(() => (track(id)!.freeze = null), { label: t("unfreeze") });
+}
+
 export function toggleMute(ids: number[]) {
+  ids = withGroups(ids);
   if (!ids.length) return;
   commit(() => {
     const ts = P.p.tracks.filter((x) => ids.includes(x.id));
@@ -1276,6 +1573,7 @@ export function toggleMute(ids: number[]) {
 
 /** Solo: only these tracks are heard. `add` keeps other soloed tracks; clicking an exclusive solo again clears it. */
 export function soloOnly(ids: number[], add = false) {
+  ids = withGroups(ids);
   if (!ids.length) return;
   commit(() => {
     const already = P.p.tracks.filter((x) => x.solo).map((x) => x.id);
@@ -1331,7 +1629,11 @@ async function pollLoop() {
       tp.input = r.input;
       tp.inputOpen = r.inputOpen;
       tp.error = r.error;
-      if (tp.recording) tp.recPeaks.push(Math.max(r.input[0], r.input[1]));
+      if (tp.recording) {
+        tp.recPeaks.push(Math.max(r.input[0], r.input[1]));
+        // punch out a moment after the out point; timer recordings stop when their time is up
+        if ((recPunch && r.pos > recPunch.end + app.rate * 0.25) || (recStopAt && Date.now() >= recStopAt)) stopRecording();
+      }
       if (S.settings.follow && r.playing) {
         const px = (r.pos - ed.scroll) / ed.fpp;
         if (px > ed.viewWidth * 0.92 || px < 0) ed.scroll = Math.max(0, r.pos - ed.viewWidth * 0.1 * ed.fpp);

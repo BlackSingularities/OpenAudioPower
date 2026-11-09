@@ -110,6 +110,22 @@ function scaler(scale: WaveScale, py: Pyramid, minSpan = 12) {
   }
 }
 
+/** Inverse of the display scale: drawn height 0–1 → sample amplitude (for the pencil). */
+export function waveInverse(id: number, pk: Peaks, scale: WaveScale): (a: number) => number {
+  const py = pyramid(id, pk);
+  switch (scale) {
+    case "linear":
+      return (a) => a;
+    case "db":
+      return (a) => (a <= 0 ? 0 : Math.pow(10, (a * 54 - 54) / 20));
+    default: {
+      const lo = Math.min(py.lo, py.hi - 12);
+      const span = Math.max(6, py.hi - lo);
+      return (a) => (a <= 0.03 ? 0 : Math.pow(10, (lo + ((Math.min(1, a) - 0.06) * span) / 0.94) / 20));
+    }
+  }
+}
+
 // band colours: bass red-orange, mids green, highs blue
 const C_LOW = [255, 78, 64];
 const C_MID = [96, 230, 120];

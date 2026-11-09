@@ -6,7 +6,7 @@
   import TrackHeader from "./TrackHeader.svelte";
   import { t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
-  import { drawWave, setRawListener } from "../lib/wave";
+  import { drawWave, setRawListener, waveInverse } from "../lib/wave";
   import { fmtTime } from "../lib/format";
   import {
     P, S, app, ed, tp, peakVersion, getPeaks, getBands, source, findClip, track as getTrack, commit, beginGesture, endGesture, syncEngine,
@@ -16,6 +16,7 @@
     autoOf, envelopeAt, AUTO_RANGE, type AutoLane, type AutoPoint,
     openSpectral,
     openRemix,
+    drawSamples, toast, labelNext, addLabel,
   } from "../lib/store.svelte";
 
   const HEADER_W = 214;
@@ -57,7 +58,7 @@
     JSON.stringify(P.p.tracks);
     JSON.stringify(P.p.loop);
     JSON.stringify(P.p.markers);
-    void [ed.fpp, ed.scroll, ed.vscroll, ed.sel?.start, ed.sel?.end, ed.selClips.length, ed.selClips[0], ed.selTrack, peakVersion.v, W, H, hover?.clip, hover?.zone, P.p.bpm, P.p.beats, S.settings.timeMode, S.settings.wave.scale, S.settings.wave.style, S.settings.wave.color, tp.recording, tp.recording ? tp.recFrames : 0, app.sources.length];
+    void [ed.tool, pencilPts.length, ed.fpp, ed.scroll, ed.vscroll, ed.sel?.start, ed.sel?.end, ed.selClips.length, ed.selClips[0], ed.selTrack, peakVersion.v, W, H, hover?.clip, hover?.zone, P.p.bpm, P.p.beats, S.settings.timeMode, S.settings.wave.scale, S.settings.wave.style, S.settings.wave.color, tp.recording, tp.recording ? tp.recFrames : 0, app.sources.length];
     schedule();
   });
 
@@ -123,6 +124,27 @@
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
+  /** Overlapping clips on a track crossfade (same rule as the mixer): clip id → [in, out]. */
+  function xfades(tr: Track): Map<number, [number, number]> {
+    const m = new Map<number, [number, number]>();
+    const cl = tr.clips.filter((c) => !c.muted).sort((a, b) => a.start - b.start);
+    for (let w = 0; w < cl.length; w++) {
+      const a = cl[w];
+      const aEnd = a.start + a.len;
+      const b = cl.slice(w + 1).find((b) => b.start < aEnd && b.start + b.len > aEnd);
+      if (!b) continue;
+      const ov = Math.min(aEnd - b.start, a.len, b.len);
+      if (ov <= 0) continue;
+      const ea = m.get(a.id) ?? [a.fadeIn, a.fadeOut];
+      ea[1] = Math.max(ea[1], ov);
+      m.set(a.id, ea);
+      const eb = m.get(b.id) ?? [b.fadeIn, b.fadeOut];
+      eb[0] = Math.max(eb[0], ov);
+      m.set(b.id, eb);
+    }
+    return m;
+  }
+
   function fadeGain(t: number) {
     const x = Math.min(1, Math.max(0, t));
     return Math.sin((x * Math.PI) / 2);
@@ -161,7 +183,13 @@
         ctx.fillRect(0, y + h - 1, W, 1);
         const anySolo = P.p.tracks.some((x) => x.solo);
         const dim = tr.mute || (anySolo && !tr.solo);
-        for (const c of tr.clips) drawClip(ctx, tr, c, y, h, dim);
+        if (tr.bus) drawBusLane(ctx, tr, y, h);
+        const xf = xfades(tr);
+        for (const c of tr.clips) drawClip(ctx, tr, c, y, h, dim, xf.get(c.id));
+        if (tr.freeze) {
+          ctx.fillStyle = "rgba(125,211,252,0.06)";
+          ctx.fillRect(0, y, W, h - 1);
+        }
         if (tp.recording && tr.armed) drawRecording(ctx, y, h);
         if (tr.auto && tr.auto.show !== "off") drawAuto(ctx, tr, tr.auto.show, y, h);
       }
@@ -188,6 +216,23 @@
       ctx.fillStyle = alpha(accent, 0.9);
       ctx.fillRect(Math.round(a), ty, 1, th);
       ctx.fillRect(Math.round(b), ty, 1, th);
+    }
+    // region labels
+    for (const m of P.p.markers) {
+      if (m.end === undefined) continue;
+      const a = xOf(m.pos);
+      const b = xOf(m.end);
+      if (b < 0 || a > W) continue;
+      ctx.fillStyle = "rgba(56,189,248,0.06)";
+      ctx.fillRect(a, 0, b - a, H);
+    }
+    // pencil stroke in progress
+    if (pencilPts.length > 1) {
+      ctx.strokeStyle = "#fde047";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      pencilPts.forEach(([x, yy], i) => (i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy)));
+      ctx.stroke();
     }
     // markers
     for (const m of P.p.markers) {
@@ -352,7 +397,19 @@
     laneCv!.addEventListener("pointerup", up);
   }
 
-  function drawClip(ctx: CanvasRenderingContext2D, tr: Track, c: Clip, y: number, h: number, dim: boolean) {
+  function drawBusLane(ctx: CanvasRenderingContext2D, tr: Track, y: number, h: number) {
+    ctx.fillStyle = "rgba(148,163,184,0.05)";
+    ctx.fillRect(0, y, W, h - 1);
+    const from = P.p.tracks.filter((x) => x.output === tr.id || (x.sends ?? []).some((s) => s.on && s.target === tr.id)).map((x) => x.name);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "11.5px 'Segoe UI Variable Text', 'Segoe UI', sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText(from.length ? `${t("busFrom")}: ${from.join(", ")}` : t("busEmpty"), 12, y + h / 2, W - 24);
+  }
+
+  function drawClip(ctx: CanvasRenderingContext2D, tr: Track, c0: Clip, y: number, h: number, dim: boolean, xf?: [number, number]) {
+    // overlapping clips show their automatic crossfade
+    const c = xf ? { ...c0, fadeIn: Math.max(c0.fadeIn, xf[0]), fadeOut: Math.max(c0.fadeOut, xf[1]) } : c0;
     const x0 = xOf(c.start);
     const x1 = xOf(c.start + c.len);
     if (x1 < -2 || x0 > W + 2) return;
@@ -523,8 +580,23 @@
       ctx.fillStyle = alpha(accent, 0.35);
       ctx.fillRect(xOf(ed.sel.start), RULER_H - 4, xOf(ed.sel.end) - xOf(ed.sel.start), 4);
     }
+    // region labels: band with the name
+    for (const m of P.p.markers) {
+      if (m.end === undefined) continue;
+      const a = xOf(m.pos);
+      const b = xOf(m.end);
+      if (b < 0 || a > W) continue;
+      rr(ctx, a, 16, Math.max(2, b - a), 14, 3);
+      ctx.fillStyle = "rgba(56,189,248,0.35)";
+      ctx.fill();
+      ctx.fillStyle = "#e0f2fe";
+      ctx.font = "600 9.5px 'Segoe UI', sans-serif";
+      ctx.fillText(m.name, Math.max(a, 0) + 4, 18, Math.max(0, b - Math.max(a, 0) - 8));
+      ctx.font = "10.5px 'Cascadia Mono', Consolas, monospace";
+    }
     // markers
     for (const m of P.p.markers) {
+      if (m.end !== undefined) continue;
       const x = xOf(m.pos);
       if (x < -20 || x > W + 20) continue;
       ctx.fillStyle = "#fbbf24";
@@ -604,6 +676,10 @@
     const h = hit(x, y);
     const nh = h ? { clip: h.clip.id, zone: h.zone } : null;
     if (nh?.clip !== hover?.clip || nh?.zone !== hover?.zone) hover = nh;
+    if (ed.tool === "pencil" && h) {
+      laneCv!.style.cursor = ed.fpp <= PENCIL_FPP ? "crosshair" : "not-allowed";
+      return;
+    }
     laneCv!.style.cursor = !h ? "text" : h.zone === "trimL" || h.zone === "trimR" ? "ew-resize" : h.zone.startsWith("fade") ? "pointer" : "grab";
   }
 
@@ -624,6 +700,10 @@
       autoDown(e, ah, snapF);
       return;
     }
+    if (ed.tool === "pencil" && h) {
+      pencilDown(e, h);
+      return;
+    }
     laneCv!.setPointerCapture(e.pointerId);
     dragging = true;
     let moved = false;
@@ -633,11 +713,12 @@
 
     if (h && !e.altKey) {
       const c = h.clip;
+      const zoneLabel: Record<string, string> = { trimL: t("histTrim"), trimR: t("histTrim"), fadeIn: t("histFade"), fadeOut: t("histFade") };
       if (e.shiftKey) {
         ed.selClips = ed.selClips.includes(c.id) ? ed.selClips.filter((i) => i !== c.id) : [...ed.selClips, c.id];
       } else if (!ed.selClips.includes(c.id)) ed.selClips = [c.id];
       ed.inspectorTab = ed.inspectorTab === "track" || ed.inspectorTab === "master" ? "clip" : ed.inspectorTab;
-      beginGesture();
+      beginGesture(zoneLabel[h.zone] ?? t("histMove"));
       const orig = new Map(ed.selClips.map((id) => [id, { ...findClip(id)!.clip, trackIdx: P.p.tracks.indexOf(findClip(id)!.track) }]));
       const o = { ...c };
       const srcFrames = source(c.source)?.frames ?? c.offset + c.len;
@@ -684,7 +765,8 @@
               if (!f) continue;
               f.clip.start = Math.max(0, oc.start + snapped);
               const ti = Math.min(P.p.tracks.length - 1, Math.max(0, oc.trackIdx + dT));
-              if (P.p.tracks[ti] !== f.track) {
+              // clips never land on a bus
+              if (P.p.tracks[ti] !== f.track && !P.p.tracks[ti].bus) {
                 const from = f.track.clips;
                 from.splice(from.findIndex((x) => x.id === id), 1);
                 P.p.tracks[ti].clips.push(f.clip);
@@ -725,6 +807,71 @@
       onUpFn(ev);
     };
     laneCv!.addEventListener("pointermove", onMoveFn);
+    laneCv!.addEventListener("pointerup", up);
+  }
+
+  // ─────────────── pencil ───────────────
+
+  let pencilPts = $state<[number, number][]>([]);
+  /** samples are visible (and drawable) below this many frames per pixel */
+  const PENCIL_FPP = 16;
+
+  function pencilDown(e: PointerEvent, h: { tr: Track; clip: Clip; top: number }) {
+    const c = h.clip;
+    if (ed.fpp > PENCIL_FPP) {
+      toast(t("pencilZoom"), "info");
+      return;
+    }
+    const pk = getPeaks(c.source);
+    if (!pk) return;
+    const inv = waveInverse(c.source, pk, S.settings.wave.scale);
+    // same geometry as drawClip
+    const cy = h.top + 3;
+    const ch = h.tr.height - 7;
+    const header = ch > 44 ? 15 : 0;
+    const wy = cy + header + (ch - header) / 2;
+    const wh = (ch - header) / 2 - 3;
+    const gain = Math.pow(10, c.gain / 20);
+    const vals = new Map<number, number>();
+    let last: [number, number] | null = null;
+    const put = (x: number, y: number) => {
+      const f = Math.round(c.offset + (fOf(x) - c.start));
+      if (f < c.offset || f >= c.offset + c.len) return;
+      const a = (wy - y) / Math.max(1, wh);
+      const v = (Math.sign(a) * inv(Math.abs(a))) / gain;
+      if (last && last[0] !== f) {
+        // fill every frame between two pointer positions
+        const [f0, v0] = last;
+        const n = Math.abs(f - f0);
+        for (let i = 1; i < n; i++) vals.set(f0 + Math.sign(f - f0) * i, v0 + ((v - v0) * i) / n);
+      }
+      vals.set(f, v);
+      last = [f, v];
+      pencilPts = [...pencilPts, [x, Math.max(cy + header, Math.min(cy + ch, y))]];
+    };
+    laneCv!.setPointerCapture(e.pointerId);
+    dragging = true;
+    pencilPts = [];
+    const p0 = localXY(e);
+    put(p0.x, p0.y);
+    const mv = (ev: PointerEvent) => {
+      const p = localXY(ev);
+      put(p.x, p.y);
+    };
+    const up = async () => {
+      dragging = false;
+      laneCv!.removeEventListener("pointermove", mv);
+      laneCv!.removeEventListener("pointerup", up);
+      const keys = [...vals.keys()];
+      if (!keys.length) return (pencilPts = []);
+      const a = Math.min(...keys);
+      const b = Math.max(...keys);
+      const out = new Float32Array(b - a + 1);
+      for (let f = a; f <= b; f++) out[f - a] = vals.get(f) ?? 0;
+      await drawSamples(c.id, a, out);
+      pencilPts = [];
+    };
+    laneCv!.addEventListener("pointermove", mv);
     laneCv!.addEventListener("pointerup", up);
   }
 
@@ -772,6 +919,8 @@
       openMenu(e, [
         { label: t("paste"), icon: "paste", hint: "Ctrl+V", run: () => (seek(snapFrame(at)), paste()) },
         { label: t("addMarker"), icon: "marker", hint: "M", run: () => (seek(snapFrame(at)), addMarker()) },
+        { label: ed.sel ? t("addLabelSel") : t("addLabel"), icon: "label", hint: "Ctrl+L", run: () => (ed.sel || seek(snapFrame(at)), addLabel()) },
+        { label: t("generateTitle") + "…", icon: "tone", run: () => (seek(snapFrame(at)), (app.dialogs.generate = true)) },
         { sep: true },
         { label: t("deleteRange"), icon: "scissors", disabled: !ed.sel, run: () => deleteRange(true) },
         { label: t("silenceRange"), icon: "mute", disabled: !ed.sel, run: () => deleteRange(false, true) },
@@ -844,6 +993,7 @@
     openMenu(e, [
       { label: t("addMarker"), icon: "marker", run: () => commit(() => P.p.markers.push({ id: Date.now(), pos: snapFrame(fOf(x)), name: String(P.p.markers.length + 1) })) },
       { label: t("remove") + " " + t("markers").toLowerCase(), icon: "trash", disabled: !m, run: () => commit(() => (P.p.markers = P.p.markers.filter((k) => k !== m))) },
+      { label: t("labelsTitle") + "…", icon: "label", run: () => (app.dialogs.labels = true) },
       { sep: true },
       { label: t("loop"), icon: "loop", run: toggleLoop },
       { label: S.settings.timeMode === "time" ? t("bars") : t("seconds"), icon: "metronome", run: () => (S.settings.timeMode = S.settings.timeMode === "time" ? "bars" : "time") },
@@ -868,7 +1018,7 @@
     e.preventDefault();
     const s = source(id);
     if (!s) return;
-    if (hint.track !== null) addSourceToTrack(s, hint.track, hint.frame);
+    if (hint.track !== null && !getTrack(hint.track)?.bus) addSourceToTrack(s, hint.track, hint.frame);
     else addSourceToNewTrack(s, hint.frame);
   }
 
@@ -903,6 +1053,7 @@
   <div class="ruler-row">
     <div class="corner" style="width:{HEADER_W}px">
       <button class="btn sm ghost" onclick={addTrackCmd} data-tip={t("addTrack")}><Icon name="plus" size={14} />{t("track")}</button>
+      <button class="btn sm ghost icon" class:pencil-on={ed.tool === "pencil"} onclick={() => (ed.tool = ed.tool === "pencil" ? "select" : "pencil")} data-tip="{t('pencil')} (P)" aria-label={t("pencil")}><Icon name="pencil" size={14} /></button>
       <div class="grow"></div>
       <div class="seg mode">
         <button class:on={S.settings.timeMode === "time"} onclick={() => (S.settings.timeMode = "time")} data-tip={t("seconds")}>s</button>
@@ -954,6 +1105,10 @@
 </div>
 
 <style>
+  .pencil-on {
+    background: rgba(var(--accent-rgb), 0.45) !important;
+    color: #fff;
+  }
   .tl {
     display: flex;
     flex-direction: column;
