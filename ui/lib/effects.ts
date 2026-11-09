@@ -195,6 +195,147 @@ export const EFFECTS: EffectDef[] = [
   },
 ];
 
+const hzr = (key: string, label: L, min: number, max: number): Param => ({ key, label, min, max, step: 0.01, unit: "Hz", log: true });
+const FILTER_MODES: { value: string; label: L }[] = [
+  { value: "lowPass", label: ["Dolnoprzepustowy", "Low-pass"] },
+  { value: "bandPass", label: ["Pasmowy", "Band-pass"] },
+  { value: "highPass", label: ["Górnoprzepustowy", "High-pass"] },
+];
+const modeParam: Param = { key: "mode", label: ["Typ", "Type"], kind: "select", options: FILTER_MODES };
+
+EFFECTS.push(
+  {
+    type: "ladder",
+    label: ["Filtr analogowy (ladder)", "Ladder filter"],
+    group: "eq",
+    params: [modeParam, hz("cutoff", ["Odcięcie", "Cutoff"]), pct("resonance", ["Rezonans", "Resonance"]), db("drive", ["Nasycenie", "Drive"], 0, 24)],
+    defaults: { mode: "lowPass", cutoff: 1200, resonance: 0.4, drive: 3 },
+  },
+  {
+    type: "autoFilter",
+    label: ["Filtr automatyczny / wah", "Auto filter / wah"],
+    group: "eq",
+    params: [
+      modeParam,
+      hz("base", ["Częstotliwość bazowa", "Base frequency"], 20, 18000),
+      { key: "depth", label: ["Zakres", "Range"], min: 0, max: 7, step: 0.1, unit: "okt" },
+      hzr("rate", ["Szybkość LFO", "LFO rate"], 0.01, 20),
+      { key: "envelope", label: ["Sterowanie obwiednią", "Envelope follower"], kind: "bool" },
+      { key: "sensitivity", label: ["Czułość obwiedni", "Envelope sensitivity"], min: 0, max: 4, step: 0.01 },
+      { key: "q", label: ["Dobroć Q", "Q"], min: 0.5, max: 20, step: 0.01, log: true },
+      pct("mix", ["Mieszanie", "Mix"]),
+    ],
+    defaults: { mode: "lowPass", base: 400, depth: 3, rate: 0.5, envelope: false, sensitivity: 1, q: 3, mix: 1 },
+  },
+  {
+    type: "vowel",
+    label: ["Filtr formantowy (samogłoski)", "Formant filter (vowels)"],
+    group: "eq",
+    params: [
+      { key: "vowel", label: ["Samogłoska A→E→I→O→U", "Vowel A→E→I→O→U"], min: 0, max: 4, step: 0.01 },
+      pct("resonance", ["Rezonans", "Resonance"]),
+      hzr("rate", ["Szybkość LFO", "LFO rate"], 0, 10),
+      { key: "depth", label: ["Głębokość LFO", "LFO depth"], min: 0, max: 4, step: 0.01 },
+      pct("mix", ["Mieszanie", "Mix"]),
+    ],
+    defaults: { vowel: 0, resonance: 0.4, rate: 0, depth: 0, mix: 1 },
+  },
+  {
+    type: "tilt",
+    label: ["Korektor nachylenia (tilt)", "Tilt EQ"],
+    group: "eq",
+    params: [db("tilt", ["Nachylenie (− ciemniej, + jaśniej)", "Tilt (− darker, + brighter)"], -12, 12), hz("pivot", ["Punkt obrotu", "Pivot"], 100, 8000)],
+    defaults: { tilt: 0, pivot: 1000 },
+  },
+  {
+    type: "comb",
+    label: ["Filtr grzebieniowy", "Comb filter"],
+    group: "eq",
+    tail: 1,
+    params: [hz("freq", ["Częstotliwość", "Frequency"], 20, 5000), { key: "feedback", label: ["Sprzężenie", "Feedback"], min: -0.97, max: 0.97, step: 0.01 }, pct("mix", ["Mieszanie", "Mix"])],
+    defaults: { freq: 220, feedback: 0.6, mix: 0.5 },
+  },
+  {
+    type: "multiband",
+    label: ["Kompresor wielopasmowy", "Multiband compressor"],
+    group: "dyn",
+    params: [
+      hz("lowX", ["Podział niski", "Low crossover"], 40, 2000),
+      hz("highX", ["Podział wysoki", "High crossover"], 500, 16000),
+      db("thrLow", ["Próg – bas", "Threshold – low"], -60, 0),
+      db("thrMid", ["Próg – środek", "Threshold – mid"], -60, 0),
+      db("thrHigh", ["Próg – góra", "Threshold – high"], -60, 0),
+      db("gainLow", ["Wzmocnienie – bas", "Gain – low"], -12, 12),
+      db("gainMid", ["Wzmocnienie – środek", "Gain – mid"], -12, 12),
+      db("gainHigh", ["Wzmocnienie – góra", "Gain – high"], -12, 12),
+      { key: "ratio", label: ["Stosunek", "Ratio"], min: 1, max: 20, step: 0.1, unit: ":1", log: true },
+      ms("attack", ["Atak", "Attack"], 0.1, 200),
+      ms("release", ["Zwolnienie", "Release"], 5, 2000),
+    ],
+    defaults: { lowX: 200, highX: 3000, thrLow: -20, thrMid: -18, thrHigh: -16, gainLow: 0, gainMid: 0, gainHigh: 0, ratio: 3, attack: 10, release: 150 },
+  },
+  {
+    type: "transient",
+    label: ["Kształtowanie transjentów", "Transient shaper"],
+    group: "dyn",
+    params: [
+      { key: "attack", label: ["Atak", "Attack"], min: -1, max: 1, step: 0.01, unit: "%" },
+      { key: "sustain", label: ["Wybrzmienie", "Sustain"], min: -1, max: 1, step: 0.01, unit: "%" },
+      db("output", ["Wyjście", "Output"], -24, 12),
+    ],
+    defaults: { attack: 0.3, sustain: 0, output: 0 },
+  },
+  {
+    type: "clipper",
+    label: ["Clipper", "Clipper"],
+    group: "dyn",
+    params: [db("input", ["Wejście", "Input"], 0, 24), db("ceiling", ["Sufit", "Ceiling"], -24, 0), pct("softness", ["Miękkość", "Softness"]), db("output", ["Wyjście", "Output"], -24, 12)],
+    defaults: { input: 3, ceiling: -0.3, softness: 0.3, output: 0 },
+  },
+  {
+    type: "exciter",
+    label: ["Exciter (harmoniczne)", "Exciter (harmonics)"],
+    group: "color",
+    params: [hz("freq", ["Od częstotliwości", "From frequency"], 500, 16000), db("drive", ["Nasycenie", "Drive"], 0, 36), pct("mix", ["Ilość", "Amount"])],
+    defaults: { freq: 3500, drive: 12, mix: 0.2 },
+  },
+  {
+    type: "tape",
+    label: ["Symulacja taśmy", "Tape simulation"],
+    group: "color",
+    params: [
+      db("drive", ["Nasycenie", "Drive"], 0, 24),
+      pct("wow", ["Wow (wolne falowanie)", "Wow"]),
+      pct("flutter", ["Flutter (szybkie drżenie)", "Flutter"]),
+      db("hiss", ["Szum taśmy", "Hiss"], -96, -30),
+      hz("tone", ["Barwa", "Tone"], 1000, 20000),
+      pct("mix", ["Mieszanie", "Mix"]),
+    ],
+    defaults: { drive: 6, wow: 0.2, flutter: 0.2, hiss: -96, tone: 12000, mix: 1 },
+  },
+  {
+    type: "ringMod",
+    label: ["Modulator pierścieniowy", "Ring modulator"],
+    group: "mod",
+    params: [hzr("freq", ["Częstotliwość", "Frequency"], 1, 5000), pct("mix", ["Mieszanie", "Mix"])],
+    defaults: { freq: 30, mix: 0.5 },
+  },
+  {
+    type: "vibrato",
+    label: ["Vibrato", "Vibrato"],
+    group: "mod",
+    params: [hzr("rate", ["Szybkość", "Rate"], 0.1, 14), ms("depth", ["Głębokość", "Depth"], 0, 10, false)],
+    defaults: { rate: 5, depth: 2 },
+  },
+  {
+    type: "haas",
+    label: ["Poszerzenie Haasa", "Haas widener"],
+    group: "space",
+    params: [ms("delay", ["Opóźnienie", "Delay"], 0, 40, false), { key: "right", label: ["Opóźniaj prawy kanał", "Delay right channel"], kind: "bool" }, pct("mix", ["Mieszanie", "Mix"])],
+    defaults: { delay: 12, right: true, mix: 1 },
+  },
+);
+
 export const GROUPS: { id: EffectDef["group"]; label: L }[] = [
   { id: "eq", label: ["Korekcja", "EQ & filters"] },
   { id: "dyn", label: ["Dynamika", "Dynamics"] },
@@ -331,6 +472,39 @@ export const OPS: OpDef[] = [
     defaults: { amount: 0.6, room: 0.6 },
   },
   { op: "declick", label: ["Usuwanie trzasków", "Declick"], params: [pct("strength", ["Siła", "Strength"])], defaults: { strength: 0.5 } },
+  {
+    op: "declip",
+    label: ["Napraw przester", "Declip"],
+    params: [{ key: "tolerance", label: ["Tolerancja wykrywania", "Detection tolerance"], min: 0, max: 0.2, step: 0.005, unit: "%" }, db("gain", ["Wzmocnienie po naprawie", "Gain after repair"], -12, 0)],
+    defaults: { tolerance: 0.01, gain: -3 },
+  },
+  {
+    op: "dehum",
+    label: ["Usuń przydźwięk", "Hum removal"],
+    params: [
+      { key: "base", label: ["Częstotliwość sieci (50 Europa, 60 USA)", "Mains frequency (50 Europe, 60 USA)"], min: 50, max: 60, step: 10, unit: "Hz" },
+      { key: "harmonics", label: ["Harmoniczne", "Harmonics"], min: 1, max: 16, step: 1 },
+      { key: "q", label: ["Wąskość filtra", "Notch narrowness"], min: 2, max: 100, step: 1, log: true },
+    ],
+    defaults: { base: 50, harmonics: 8, q: 30 },
+  },
+  {
+    op: "deplosive",
+    label: ["Głoski wybuchowe", "Plosive removal"],
+    params: [hz("freq", ["Pasmo do", "Band up to"], 60, 400), pct("sensitivity", ["Czułość", "Sensitivity"]), db("reduction", ["Maks. redukcja", "Max reduction"], 0, 40)],
+    defaults: { freq: 150, sensitivity: 0.6, reduction: 18 },
+  },
+  {
+    op: "level",
+    label: ["Wyrównaj głośność", "Leveler"],
+    params: [
+      db("target", ["Docelowy RMS", "Target RMS"], -40, -6),
+      db("maxGain", ["Maks. zmiana", "Max change"], 0, 30),
+      db("gate", ["Pomijaj ciszę poniżej", "Ignore silence below"], -90, -20),
+      ms("speed", ["Szybkość reakcji", "Response time"], 50, 10000),
+    ],
+    defaults: { target: -20, maxGain: 12, gate: -50, speed: 800 },
+  },
   { op: "pitch", label: ["Zmiana wysokości", "Pitch shift"], params: [{ key: "semitones", label: ["Półtony", "Semitones"], min: -24, max: 24, step: 0.1, unit: "st" }], defaults: { semitones: 2 } },
   { op: "stretch", label: ["Rozciąganie w czasie", "Time stretch"], params: [{ key: "ratio", label: ["Długość", "Length"], min: 0.25, max: 4, step: 0.01, unit: "×", log: true }], defaults: { ratio: 1.25 }, changesLength: true },
   { op: "speed", label: ["Prędkość (z wysokością)", "Speed (with pitch)"], params: [{ key: "ratio", label: ["Prędkość", "Speed"], min: 0.25, max: 4, step: 0.01, unit: "×", log: true }], defaults: { ratio: 1.1 }, changesLength: true },

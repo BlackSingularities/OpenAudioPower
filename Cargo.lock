@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "oap-plughost"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "clap-sys",
@@ -2865,7 +2865,7 @@ dependencies = [
 
 [[package]]
 name = "oap-testplug"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "clap-sys",
  "windows 0.62.2",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "openaudiopower"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "cpal",
  "dirs 6.0.0",
@@ -3183,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "openaudiopower-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "deep-filter-rt",
  "ebur128",

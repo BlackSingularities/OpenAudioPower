@@ -7,6 +7,7 @@ use crate::dsp::dynamics::{Compressor, DeEsser, Gate, Limiter};
 use crate::dsp::modulation::{ModDelay, Phaser, Tremolo};
 use crate::dsp::reverb::Reverb;
 use crate::dsp::saturation::{BitCrusher, Curve, Saturator, StereoTool};
+use crate::dsp::extra::{AutoFilter, Clipper, Comb, Exciter, FilterMode, Haas, Ladder, Multiband, RingMod, Tape, Tilt, Transient, Vibrato, Vowel};
 use crate::dsp::Processor;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,32 @@ pub enum EffectSpec {
     BitCrusher { bits: f32, downsample: usize, mix: f32 },
     #[serde(rename_all = "camelCase")]
     Stereo { gain: f32, pan: f32, width: f32, invert_l: bool, invert_r: bool, mono: bool },
+    #[serde(rename_all = "camelCase")]
+    Ladder { mode: FilterMode, cutoff: f32, resonance: f32, drive: f32 },
+    #[serde(rename_all = "camelCase")]
+    AutoFilter { mode: FilterMode, base: f32, depth: f32, rate: f32, envelope: bool, q: f32, sensitivity: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    Vowel { vowel: f32, resonance: f32, rate: f32, depth: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    Tilt { tilt: f32, pivot: f32 },
+    #[serde(rename_all = "camelCase")]
+    Comb { freq: f32, feedback: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    Multiband { low_x: f32, high_x: f32, thr_low: f32, thr_mid: f32, thr_high: f32, gain_low: f32, gain_mid: f32, gain_high: f32, ratio: f32, attack: f32, release: f32 },
+    #[serde(rename_all = "camelCase")]
+    Transient { attack: f32, sustain: f32, output: f32 },
+    #[serde(rename_all = "camelCase")]
+    Exciter { freq: f32, drive: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    Clipper { input: f32, ceiling: f32, softness: f32, output: f32 },
+    #[serde(rename_all = "camelCase")]
+    Tape { drive: f32, wow: f32, flutter: f32, hiss: f32, tone: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    RingMod { freq: f32, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    Vibrato { rate: f32, depth: f32 },
+    #[serde(rename_all = "camelCase")]
+    Haas { delay: f32, right: bool, mix: f32 },
     /// A VST3 / CLAP plug-in running in `oap-plughost`. `instance` names the running helper;
     /// the rest lets a project start it again (`state` is the plug-in's own blob, base64).
     #[serde(rename_all = "camelCase")]
@@ -114,6 +141,19 @@ enum Proc {
     Crush(BitCrusher),
     Stereo(StereoTool),
     Ext(Box<dyn Processor>),
+    Ladder(Ladder),
+    AutoFilter(AutoFilter),
+    Vowel(Vowel),
+    Tilt(Tilt),
+    Comb(Comb),
+    Multi(Box<Multiband>),
+    Transient(Transient),
+    Exciter(Exciter),
+    Clipper(Clipper),
+    Tape(Box<Tape>),
+    Ring(RingMod),
+    Vibrato(Vibrato),
+    Haas(Haas),
 }
 
 impl Proc {
@@ -133,6 +173,19 @@ impl Proc {
             EffectSpec::Saturation { .. } => Proc::Sat(Saturator::new(rate)),
             EffectSpec::BitCrusher { .. } => Proc::Crush(BitCrusher::new()),
             EffectSpec::Stereo { .. } => Proc::Stereo(StereoTool::new()),
+            EffectSpec::Ladder { .. } => Proc::Ladder(Ladder::new(rate)),
+            EffectSpec::AutoFilter { .. } => Proc::AutoFilter(AutoFilter::new(rate)),
+            EffectSpec::Vowel { .. } => Proc::Vowel(Vowel::new(rate)),
+            EffectSpec::Tilt { .. } => Proc::Tilt(Tilt::new(rate)),
+            EffectSpec::Comb { .. } => Proc::Comb(Comb::new(rate)),
+            EffectSpec::Multiband { .. } => Proc::Multi(Box::new(Multiband::new(rate))),
+            EffectSpec::Transient { .. } => Proc::Transient(Transient::new(rate)),
+            EffectSpec::Exciter { .. } => Proc::Exciter(Exciter::new(rate)),
+            EffectSpec::Clipper { .. } => Proc::Clipper(Clipper::new()),
+            EffectSpec::Tape { .. } => Proc::Tape(Box::new(Tape::new(rate))),
+            EffectSpec::RingMod { .. } => Proc::Ring(RingMod::new(rate)),
+            EffectSpec::Vibrato { .. } => Proc::Vibrato(Vibrato::new(rate)),
+            EffectSpec::Haas { .. } => Proc::Haas(Haas::new(rate)),
             EffectSpec::Plugin { instance, .. } => Proc::Ext(EXTERNAL.get().and_then(|f| f(*instance)).unwrap_or_else(|| Box::new(Passthrough))),
         };
         p.update(spec);
@@ -160,6 +213,21 @@ impl Proc {
             (Proc::Sat(p), EffectSpec::Saturation { drive, curve, mix, output, tone }) => p.set(*drive, *curve, *mix, *output, *tone),
             (Proc::Crush(p), EffectSpec::BitCrusher { bits, downsample, mix }) => p.set(*bits, *downsample, *mix),
             (Proc::Stereo(p), EffectSpec::Stereo { gain, pan, width, invert_l, invert_r, mono }) => p.set(*gain, *pan, *width, *invert_l, *invert_r, *mono),
+            (Proc::Ladder(p), EffectSpec::Ladder { mode, cutoff, resonance, drive }) => p.set(*mode, *cutoff, *resonance, *drive),
+            (Proc::AutoFilter(p), EffectSpec::AutoFilter { mode, base, depth, rate, envelope, q, sensitivity, mix }) => p.set(*mode, *base, *depth, *rate, *envelope, *q, *sensitivity, *mix),
+            (Proc::Vowel(p), EffectSpec::Vowel { vowel, resonance, rate, depth, mix }) => p.set(*vowel, *resonance, *rate, *depth, *mix),
+            (Proc::Tilt(p), EffectSpec::Tilt { tilt, pivot }) => p.set(*tilt, *pivot),
+            (Proc::Comb(p), EffectSpec::Comb { freq, feedback, mix }) => p.set(*freq, *feedback, *mix),
+            (Proc::Multi(p), EffectSpec::Multiband { low_x, high_x, thr_low, thr_mid, thr_high, gain_low, gain_mid, gain_high, ratio, attack, release }) => {
+                p.set(*low_x, *high_x, [*thr_low, *thr_mid, *thr_high], [*gain_low, *gain_mid, *gain_high], *ratio, *attack, *release)
+            }
+            (Proc::Transient(p), EffectSpec::Transient { attack, sustain, output }) => p.set(*attack, *sustain, *output),
+            (Proc::Exciter(p), EffectSpec::Exciter { freq, drive, mix }) => p.set(*freq, *drive, *mix),
+            (Proc::Clipper(p), EffectSpec::Clipper { input, ceiling, softness, output }) => p.set(*input, *ceiling, *softness, *output),
+            (Proc::Tape(p), EffectSpec::Tape { drive, wow, flutter, hiss, tone, mix }) => p.set(*drive, *wow, *flutter, *hiss, *tone, *mix),
+            (Proc::Ring(p), EffectSpec::RingMod { freq, mix }) => p.set(*freq, *mix),
+            (Proc::Vibrato(p), EffectSpec::Vibrato { rate, depth }) => p.set(*rate, *depth),
+            (Proc::Haas(p), EffectSpec::Haas { delay, right, mix }) => p.set(*delay, *right, *mix),
             _ => {}
         }
     }
@@ -181,6 +249,19 @@ impl Proc {
             Proc::Crush(p) => p,
             Proc::Stereo(p) => p,
             Proc::Ext(p) => p.as_mut(),
+            Proc::Ladder(p) => p,
+            Proc::AutoFilter(p) => p,
+            Proc::Vowel(p) => p,
+            Proc::Tilt(p) => p,
+            Proc::Comb(p) => p,
+            Proc::Multi(p) => p.as_mut(),
+            Proc::Transient(p) => p,
+            Proc::Exciter(p) => p,
+            Proc::Clipper(p) => p,
+            Proc::Tape(p) => p.as_mut(),
+            Proc::Ring(p) => p,
+            Proc::Vibrato(p) => p,
+            Proc::Haas(p) => p,
         }
     }
 }

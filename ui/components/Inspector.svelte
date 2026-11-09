@@ -59,7 +59,7 @@
   // ── process tab ──
   const OP_GROUPS: { label: [string, string]; ops: string[] }[] = [
     { label: ["Głośność", "Level"], ops: ["gain", "normalize", "fadeIn", "fadeOut"] },
-    { label: ["Naprawa", "Repair"], ops: ["denoise", "declick", "removeDc", "trimSilence"] },
+    { label: ["Naprawa", "Repair"], ops: ["denoise", "declick", "declip", "dehum", "deplosive", "level", "removeDc", "trimSilence"] },
     { label: ["Czas i wysokość", "Time & pitch"], ops: ["pitch", "stretch", "speed", "reverse"] },
     { label: ["Kanały i faza", "Channels & phase"], ops: ["invert", "silence", "mono", "stereo", "swapChannels"] },
   ];

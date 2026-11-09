@@ -4,6 +4,7 @@
 pub mod biquad;
 pub mod delay;
 pub mod dynamics;
+pub mod extra;
 pub mod modulation;
 pub mod reverb;
 pub mod saturation;

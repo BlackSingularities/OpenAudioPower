@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- 13 nowych efektów w czasie rzeczywistym. Filtry: analogowy ladder (dolno-, pasmowo- i górnoprzepustowy z rezonansem i nasyceniem), automatyczny / wah (LFO albo obwiednia), formantowy z płynną zmianą samogłosek, tilt EQ, grzebieniowy. Dynamika: kompresor trzypasmowy, kształtowanie transjentów, clipper. Barwa: exciter, symulacja taśmy (wow, flutter, szum). Modulacja: modulator pierścieniowy, vibrato. Przestrzeń: poszerzenie Haasa.
+- Nowe operacje naprawcze w panelu Obróbka i w przetwarzaniu wsadowym: odbudowa przesterowanych szczytów, usuwanie przydźwięku sieci 50/60 Hz z harmonicznymi, tłumienie głosek wybuchowych, wyrównanie głośności (leveler).
+- Menu „Dodaj efekt” jest pogrupowane w podmenu według kategorii.
+
 ## 1.1.0
 
 - Eksport do MP3, M4A (AAC), OGG Vorbis i Opus z wyborem jakości – z okna eksportu, eksportu ścieżek i z biblioteki.

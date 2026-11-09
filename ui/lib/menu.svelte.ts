@@ -7,6 +7,8 @@ export interface MenuItem {
   disabled?: boolean;
   danger?: boolean;
   sep?: boolean;
+  /** opens a nested menu on hover / click */
+  children?: MenuItem[];
 }
 
 export const menu = $state({ open: false, x: 0, y: 0, items: [] as MenuItem[] });

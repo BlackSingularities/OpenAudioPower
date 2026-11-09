@@ -19,14 +19,16 @@
 
   function addMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const items = GROUPS.flatMap((g, gi) => [
-      ...(gi ? [{ sep: true }] : []),
-      ...EFFECTS.filter((x) => x.group === g.id).map((d) => ({ label: L(d.label), icon: "fx", run: () => {
+    // one submenu per group – the flat list no longer fits on screen
+    const items: any[] = GROUPS.map((g) => ({
+      label: L(g.label),
+      icon: "fx",
+      children: EFFECTS.filter((x) => x.group === g.id).map((d) => ({ label: L(d.label), icon: "fx", run: () => {
         addEffect(target, d.type);
         const s = list();
         open[s[s.length - 1].id] = true;
       } })),
-    ]);
+    }));
     items.push({ sep: true } as any, { label: t("pluginsAdd"), icon: "sparkles", run: () => {
       app.pluginTarget = target ? target.id : "master";
       app.dialogs.plugins = true;

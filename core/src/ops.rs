@@ -59,6 +59,14 @@ pub enum Op {
     #[serde(rename_all = "camelCase")]
     TrimSilence { threshold: f32 },
     Declick { strength: f32 },
+    #[serde(rename_all = "camelCase")]
+    Declip { tolerance: f32, #[serde(default)] gain: f32 },
+    #[serde(rename_all = "camelCase")]
+    Dehum { base: f32, harmonics: usize, q: f32 },
+    #[serde(rename_all = "camelCase")]
+    Deplosive { freq: f32, sensitivity: f32, reduction: f32 },
+    #[serde(rename_all = "camelCase")]
+    Level { target: f32, max_gain: f32, gate: f32, speed: f32 },
     /// DeepFilterNet speech enhancement, optionally followed by late-reverb suppression.
     #[serde(rename_all = "camelCase")]
     VoiceDenoise { strength: f32, #[serde(default)] dereverb: f32, #[serde(default = "room_default")] room: f32 },
@@ -275,6 +283,29 @@ pub fn apply(src: &AudioBuffer, start: usize, end: usize, op: &Op, cancel: &Canc
         Op::Declick { strength } => {
             let mut p = part;
             declick(&mut p, *strength);
+            p
+        }
+        Op::Declip { tolerance, gain } => {
+            let mut p = part;
+            crate::repair::declip(&mut p, *tolerance, *gain);
+            p
+        }
+        Op::Dehum { base, harmonics, q } => {
+            let mut p = part;
+            crate::repair::dehum(&mut p, *base, *harmonics, *q);
+            if !whole {
+                blend_edges(&src.slice(s, e), &mut p, edge);
+            }
+            p
+        }
+        Op::Deplosive { freq, sensitivity, reduction } => {
+            let mut p = part;
+            crate::repair::deplosive(&mut p, *freq, *sensitivity, *reduction);
+            p
+        }
+        Op::Level { target, max_gain, gate, speed } => {
+            let mut p = part;
+            crate::repair::level(&mut p, *target, *max_gain, *gate, *speed);
             p
         }
         Op::VoiceDenoise { strength, dereverb, room } => {

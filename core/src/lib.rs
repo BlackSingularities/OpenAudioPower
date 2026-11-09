@@ -11,6 +11,7 @@ pub mod enhance;
 pub mod mix;
 pub mod ops;
 pub mod peaks;
+pub mod repair;
 pub mod resample;
 pub mod separate;
 pub mod spectral;
