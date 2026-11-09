@@ -105,6 +105,16 @@ impl Biquad {
     }
 }
 
+/// Which part of a stereo signal a band works on.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum EqTarget {
+    #[default]
+    Stereo,
+    Mid,
+    Side,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EqBand {
     pub kind: FilterKind,
@@ -113,21 +123,30 @@ pub struct EqBand {
     pub gain: f32,
     #[serde(default = "on")]
     pub on: bool,
+    #[serde(default)]
+    pub target: EqTarget,
 }
 fn on() -> bool {
     true
 }
 
-/// Multi-band parametric EQ (any number of bands, any channel count).
+/// FIR length of the linear-phase mode (≈ 85 ms at 48 kHz, enough for low shelves).
+const LIN_TAPS: usize = 4096;
+
+/// Multi-band parametric EQ (any number of bands, any channel count). Bands can work on the
+/// mid or side signal of a stereo pair; `linear` runs the whole curve as a linear-phase FIR.
 pub struct Equalizer {
     rate: f32,
     bands: Vec<EqBand>,
     filters: Vec<Vec<Biquad>>, // [band][channel]
+    linear: bool,
+    /// linear-phase convolvers: [mid or mono, side]
+    conv: Vec<super::fir::Convolver>,
 }
 
 impl Equalizer {
     pub fn new(rate: f32, bands: &[EqBand]) -> Self {
-        let mut e = Self { rate, bands: Vec::new(), filters: Vec::new() };
+        let mut e = Self { rate, bands: Vec::new(), filters: Vec::new(), linear: false, conv: Vec::new() };
         e.set(bands);
         e
     }
@@ -142,6 +161,37 @@ impl Equalizer {
             }
         }
         self.bands = bands.to_vec();
+        if self.linear {
+            self.design();
+        }
+    }
+    pub fn set_linear(&mut self, on: bool) {
+        if on != self.linear {
+            self.linear = on;
+            self.conv.clear();
+            if on {
+                self.design();
+            }
+        }
+    }
+    /// Response (dB) of the bands that reach the mid (`side` = false) or side signal.
+    fn response(&self, side: bool, f: f32) -> f32 {
+        self.bands
+            .iter()
+            .filter(|b| b.on && (b.target == EqTarget::Stereo || (b.target == EqTarget::Side) == side))
+            .map(|b| Coefs::new(b.kind, self.rate, b.freq, b.q, b.gain).response_db(f, self.rate))
+            .sum()
+    }
+    fn design(&mut self) {
+        let rate = self.rate;
+        let hm = super::fir::design(LIN_TAPS, rate, &|f| self.response(false, f));
+        let hs = super::fir::design(LIN_TAPS, rate, &|f| self.response(true, f));
+        if self.conv.len() == 2 {
+            self.conv[0].set(&hm);
+            self.conv[1].set(&hs);
+        } else {
+            self.conv = vec![super::fir::Convolver::new(&hm), super::fir::Convolver::new(&hs)];
+        }
     }
     fn ensure(&mut self, chans: usize) {
         for (i, fs) in self.filters.iter_mut().enumerate() {
@@ -154,11 +204,47 @@ impl Equalizer {
     }
 }
 
+fn to_ms(buf: &mut [Vec<f32>], n: usize) {
+    let (l, r) = buf.split_at_mut(1);
+    for i in 0..n {
+        let (a, b) = (l[0][i], r[0][i]);
+        l[0][i] = (a + b) * 0.5;
+        r[0][i] = (a - b) * 0.5;
+    }
+}
+fn to_lr(buf: &mut [Vec<f32>], n: usize) {
+    let (m, s) = buf.split_at_mut(1);
+    for i in 0..n {
+        let (a, b) = (m[0][i], s[0][i]);
+        m[0][i] = a + b;
+        s[0][i] = a - b;
+    }
+}
+
 impl Processor for Equalizer {
     fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+        let stereo = buf.len() == 2;
+        if self.linear {
+            if self.conv.len() != 2 {
+                self.design();
+            }
+            if stereo {
+                to_ms(buf, n);
+                self.conv[0].process(&mut buf[0][..n]);
+                self.conv[1].process(&mut buf[1][..n]);
+                to_lr(buf, n);
+            } else {
+                for ch in buf.iter_mut() {
+                    self.conv[0].process(&mut ch[..n]);
+                }
+            }
+            return;
+        }
         self.ensure(buf.len());
+        let ms = stereo && self.bands.iter().any(|b| b.on && b.target != EqTarget::Stereo);
+        // stereo bands on L/R (and on mono signals every band)
         for (bi, band) in self.bands.iter().enumerate() {
-            if !band.on {
+            if !band.on || (stereo && band.target != EqTarget::Stereo) || (!stereo && band.target == EqTarget::Side) {
                 continue;
             }
             for (c, ch) in buf.iter_mut().enumerate() {
@@ -168,9 +254,27 @@ impl Processor for Equalizer {
                 }
             }
         }
+        if ms {
+            to_ms(buf, n);
+            for (bi, band) in self.bands.iter().enumerate() {
+                if !band.on || band.target == EqTarget::Stereo {
+                    continue;
+                }
+                let c = if band.target == EqTarget::Mid { 0 } else { 1 };
+                let f = &mut self.filters[bi][c];
+                for s in buf[c][..n].iter_mut() {
+                    *s = f.tick(*s);
+                }
+            }
+            to_lr(buf, n);
+        }
     }
     fn reset(&mut self) {
         self.filters.iter_mut().flatten().for_each(|f| f.reset());
+        self.conv.iter_mut().for_each(|c| c.reset());
+    }
+    fn latency(&self) -> usize {
+        if self.linear { self.conv.first().map(|c| c.block()).unwrap_or(LIN_TAPS) + LIN_TAPS / 2 } else { 0 }
     }
 }
 

@@ -160,7 +160,7 @@ export const app = $state({
   sources: [] as SourceInfo[],
   job: null as Job | null,
   toasts: [] as Toast[],
-  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false, generate: false, labels: false, history: false, timer: false, duck: false },
+  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false, generate: false, labels: false, history: false, timer: false, duck: false, match: false },
   /** track that Auto Duck writes automation to */
   duckTarget: null as number | null,
   /** scheduled timer recording */

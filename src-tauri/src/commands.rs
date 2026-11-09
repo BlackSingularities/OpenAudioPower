@@ -559,7 +559,7 @@ fn finish(mut buf: AudioBuffer, o: &ExportOptions) -> AudioBuffer {
         buf = ops::apply(&buf, 0, 0, &Op::Normalize { mode: ops::NormMode::Lufs, target: l, per_channel: false }, &c).unwrap_or(buf);
         // keep the true peak below −1 dBFS after the loudness gain
         if buf.peak() > 0.89 {
-            let spec = openaudiopower_core::effects::EffectSpec::Limiter { ceiling: -1.0, release: 60.0, input: 0.0, lookahead: 5.0 };
+            let spec = openaudiopower_core::effects::EffectSpec::Limiter { ceiling: -1.0, release: 60.0, input: 0.0, lookahead: 5.0, true_peak: true };
             buf = ops::apply(&buf, 0, 0, &Op::Effect { spec, tail: 0.0 }, &c).unwrap_or(buf);
         }
     }
@@ -696,6 +696,32 @@ pub async fn auto_duck(h: AppHandle, project: Project, control: u64, start: i64,
             return Err("cancelled".into());
         }
         Ok(openaudiopower_core::stretch::duck_points(&buf, start, threshold, duck, fall, rise, hold))
+    })
+    .await
+}
+
+/// Match EQ curve that makes source `id` (range) sound like `reference` (range).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn match_eq_curve(h: AppHandle, id: u64, start: usize, end: usize, reference: u64, ref_start: usize, ref_end: usize, smoothing: f32) -> R<Vec<[f32; 2]>> {
+    let app = app_state(&h);
+    blocking(move || {
+        let t = app.get(id)?;
+        let r = app.get(reference)?;
+        let cut = |b: &AudioBuffer, a: usize, z: usize| {
+            let n = b.frames();
+            let z = if z == 0 || z > n { n } else { z };
+            b.slice(a.min(z), z)
+        };
+        let tb = cut(&t.buf, start, end);
+        let mut rb = cut(&r.buf, ref_start, ref_end);
+        if rb.rate != tb.rate {
+            rb = resample::resample(&rb, tb.rate);
+        }
+        if tb.frames() < 8192 || rb.frames() < 8192 {
+            return Err("too short".into());
+        }
+        Ok(openaudiopower_core::matcheq::match_curve(&tb, &rb, smoothing))
     })
     .await
 }

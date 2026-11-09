@@ -7,7 +7,7 @@ use crate::dsp::dynamics::{Compressor, DeEsser, Gate, Limiter};
 use crate::dsp::modulation::{ModDelay, Phaser, Tremolo};
 use crate::dsp::reverb::Reverb;
 use crate::dsp::saturation::{BitCrusher, Curve, Saturator, StereoTool};
-use crate::dsp::extra::{AutoFilter, Clipper, Comb, Exciter, FilterMode, Haas, Ladder, Multiband, RingMod, Tape, Tilt, Transient, Vibrato, Vowel};
+use crate::dsp::extra::{AutoFilter, Clipper, Comb, DynEq, DynShape, Exciter, FilterMode, Haas, Imager, Ladder, Multiband, RingMod, Tape, Tilt, Transient, Vibrato, Vowel};
 use crate::dsp::Processor;
 use serde::{Deserialize, Serialize};
 
@@ -15,13 +15,13 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum EffectSpec {
     #[serde(rename_all = "camelCase")]
-    Eq { bands: Vec<EqBand> },
+    Eq { bands: Vec<EqBand>, #[serde(default)] linear: bool },
     #[serde(rename_all = "camelCase")]
     Filter { kind: FilterKind, freq: f32, q: f32, slope: usize },
     #[serde(rename_all = "camelCase")]
     Compressor { threshold: f32, ratio: f32, attack: f32, release: f32, knee: f32, makeup: f32, mix: f32, #[serde(default)] sidechain: u64 },
     #[serde(rename_all = "camelCase")]
-    Limiter { ceiling: f32, release: f32, input: f32, lookahead: f32 },
+    Limiter { ceiling: f32, release: f32, input: f32, lookahead: f32, #[serde(default)] true_peak: bool },
     #[serde(rename_all = "camelCase")]
     Gate { threshold: f32, attack: f32, release: f32, hold: f32, range: f32 },
     #[serde(rename_all = "camelCase")]
@@ -70,6 +70,10 @@ pub enum EffectSpec {
     Vibrato { rate: f32, depth: f32 },
     #[serde(rename_all = "camelCase")]
     Haas { delay: f32, right: bool, mix: f32 },
+    #[serde(rename_all = "camelCase")]
+    DynEq { shape: DynShape, freq: f32, q: f32, threshold: f32, ratio: f32, range: f32, attack: f32, release: f32 },
+    #[serde(rename_all = "camelCase")]
+    Imager { low_x: f32, high_x: f32, width_low: f32, width_mid: f32, width_high: f32 },
     /// A VST3 / CLAP plug-in running in `oap-plughost`. `instance` names the running helper;
     /// the rest lets a project start it again (`state` is the plug-in's own blob, base64).
     #[serde(rename_all = "camelCase")]
@@ -154,12 +158,14 @@ enum Proc {
     Ring(RingMod),
     Vibrato(Vibrato),
     Haas(Haas),
+    DynEq(DynEq),
+    Imager(Imager),
 }
 
 impl Proc {
     fn new(spec: &EffectSpec, rate: f32) -> Self {
         let mut p = match spec {
-            EffectSpec::Eq { bands } => Proc::Eq(Equalizer::new(rate, bands)),
+            EffectSpec::Eq { bands, .. } => Proc::Eq(Equalizer::new(rate, bands)),
             EffectSpec::Filter { kind, freq, q, slope } => Proc::Filter(Filter::new(rate, *kind, *freq, *q, *slope)),
             EffectSpec::Compressor { .. } => Proc::Comp(Compressor::new(rate)),
             EffectSpec::Limiter { .. } => Proc::Lim(Limiter::new(rate)),
@@ -186,6 +192,8 @@ impl Proc {
             EffectSpec::RingMod { .. } => Proc::Ring(RingMod::new(rate)),
             EffectSpec::Vibrato { .. } => Proc::Vibrato(Vibrato::new(rate)),
             EffectSpec::Haas { .. } => Proc::Haas(Haas::new(rate)),
+            EffectSpec::DynEq { .. } => Proc::DynEq(DynEq::new(rate)),
+            EffectSpec::Imager { .. } => Proc::Imager(Imager::new(rate)),
             EffectSpec::Plugin { instance, .. } => Proc::Ext(EXTERNAL.get().and_then(|f| f(*instance)).unwrap_or_else(|| Box::new(Passthrough))),
         };
         p.update(spec);
@@ -194,12 +202,18 @@ impl Proc {
 
     fn update(&mut self, spec: &EffectSpec) {
         match (self, spec) {
-            (Proc::Eq(p), EffectSpec::Eq { bands }) => p.set(bands),
+            (Proc::Eq(p), EffectSpec::Eq { bands, linear }) => {
+                p.set_linear(*linear);
+                p.set(bands)
+            }
             (Proc::Filter(p), EffectSpec::Filter { kind, freq, q, slope }) => p.set(*kind, *freq, *q, *slope),
             (Proc::Comp(p), EffectSpec::Compressor { threshold, ratio, attack, release, knee, makeup, mix, .. }) => {
                 p.set(*threshold, *ratio, *attack, *release, *knee, *makeup, *mix)
             }
-            (Proc::Lim(p), EffectSpec::Limiter { ceiling, release, input, lookahead }) => p.set(*ceiling, *release, *input, *lookahead),
+            (Proc::Lim(p), EffectSpec::Limiter { ceiling, release, input, lookahead, true_peak }) => {
+                p.set_true_peak(*true_peak);
+                p.set(*ceiling, *release, *input, *lookahead)
+            }
             (Proc::Gate(p), EffectSpec::Gate { threshold, attack, release, hold, range }) => p.set(*threshold, *attack, *release, *hold, *range, 4.0),
             (Proc::DeEss(p), EffectSpec::DeEsser { freq, threshold, reduction }) => p.set(*freq, *threshold, *reduction),
             (Proc::Rev(p), EffectSpec::Reverb { room, damping, wet, dry, width, predelay, lowcut }) => {
@@ -228,6 +242,8 @@ impl Proc {
             (Proc::Ring(p), EffectSpec::RingMod { freq, mix }) => p.set(*freq, *mix),
             (Proc::Vibrato(p), EffectSpec::Vibrato { rate, depth }) => p.set(*rate, *depth),
             (Proc::Haas(p), EffectSpec::Haas { delay, right, mix }) => p.set(*delay, *right, *mix),
+            (Proc::DynEq(p), EffectSpec::DynEq { shape, freq, q, threshold, ratio, range, attack, release }) => p.set(*shape, *freq, *q, *threshold, *ratio, *range, *attack, *release),
+            (Proc::Imager(p), EffectSpec::Imager { low_x, high_x, width_low, width_mid, width_high }) => p.set(*low_x, *high_x, [*width_low, *width_mid, *width_high]),
             _ => {}
         }
     }
@@ -262,6 +278,8 @@ impl Proc {
             Proc::Ring(p) => p,
             Proc::Vibrato(p) => p,
             Proc::Haas(p) => p,
+            Proc::DynEq(p) => p,
+            Proc::Imager(p) => p,
         }
     }
 }

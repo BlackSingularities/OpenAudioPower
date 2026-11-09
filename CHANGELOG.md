@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- Korektor dynamiczny: pasmo (dzwon albo półka), które tnie lub podbija tylko wtedy, gdy jego zakres przekroczy próg – np. na syczące „s” albo dudniący bas.
+- Korektor parametryczny: każde pasmo może działać na całość, tylko na środek (M) albo tylko na boki (S), a tryb liniowej fazy przenosi całą krzywą do filtra FIR bez przesunięć fazy (opóźnienie jest kompensowane).
+- Limiter true-peak: wykrywa szczyty między próbkami na sygnale nadpróbkowanym 4×, więc sufit dotyczy dBTP. Domyślnie włączony w nowych limiterach, w presecie masteringu i przy normalizacji eksportu.
+- Imager stereo w pasmach: osobna szerokość basu, środka i góry (np. bas w mono, góra szersza), zwrotnice Linkwitza-Rileya bez zmiany barwy.
+- Match EQ (Narzędzia, menu klipu): dopasowuje barwę klipu do nagrania wzorcowego z biblioteki filtrem liniowej fazy, z podglądem krzywej i regulacją ilości.
+
 ## 1.4.0
 
 - Skracanie pauz wewnątrz nagrania (jak Truncate Silence w Audacity): pauzy cichsze od progu i dłuższe od zadanej długości są skracane, a miejsca cięcia łączy krótki crossfade.

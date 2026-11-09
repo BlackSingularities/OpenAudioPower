@@ -122,6 +122,7 @@
       id: "tools",
       items: () => [
         { label: t("generateTitle") + "…", icon: "tone", hint: "Ctrl+Shift+G", run: () => (app.dialogs.generate = true) },
+        { label: "Match EQ…", icon: "chart", run: () => (app.dialogs.match = true) },
         { sep: true },
         { label: t("stemSeparation"), icon: "stems", hint: "Ctrl+Shift+E", run: separateCmd },
         { label: t("remixTitle") + "…", icon: "sliders", hint: "Ctrl+Shift+M", run: () => openRemix() },

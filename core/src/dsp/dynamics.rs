@@ -98,13 +98,58 @@ pub struct Limiter {
     pos: usize,
     gr: f32,
     input_gain: f32,
+    /// detect inter-sample peaks on a 4× oversampled copy (ceiling in dBTP)
+    true_peak: bool,
+    /// recent input per channel for the oversampling interpolator
+    hist: Vec<[f32; TP_TAPS]>,
+    hpos: usize,
+    dpos: usize,
+}
+
+/// Taps per phase of the 4× true-peak interpolator.
+const TP_TAPS: usize = 12;
+/// Delay of the interpolator's centre in input samples.
+const TP_DELAY: usize = TP_TAPS / 2;
+
+/// Polyphase windowed-sinc coefficients for phases 1/4, 2/4 and 3/4 between samples.
+fn tp_coefs() -> &'static [[f32; TP_TAPS]; 3] {
+    static C: std::sync::OnceLock<[[f32; TP_TAPS]; 3]> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        let mut c = [[0.0f32; TP_TAPS]; 3];
+        for (p, row) in c.iter_mut().enumerate() {
+            let frac = (p + 1) as f32 / 4.0;
+            for (k, v) in row.iter_mut().enumerate() {
+                // tap k sits at offset (k − TP_DELAY + 1) samples from the interpolated point's left neighbour
+                let t = k as f32 - (TP_DELAY as f32 - 1.0) - frac;
+                let x = std::f32::consts::PI * t;
+                let sinc = if t.abs() < 1e-6 { 1.0 } else { x.sin() / x };
+                let w = 0.5 + 0.5 * (std::f32::consts::PI * t / (TP_TAPS as f32 / 2.0 + 0.5)).cos();
+                *v = sinc * w.max(0.0);
+            }
+            let sum: f32 = row.iter().sum();
+            row.iter_mut().for_each(|v| *v /= sum);
+        }
+        c
+    })
 }
 
 impl Limiter {
     pub fn new(rate: f32) -> Self {
-        let mut l = Self { rate, ceiling: 1.0, gain: 1.0, rel: 0.0, att: 0.0, look: 0, delay: Vec::new(), peaks: Vec::new(), pos: 0, gr: 0.0, input_gain: 1.0 };
+        let mut l = Self { rate, ceiling: 1.0, gain: 1.0, rel: 0.0, att: 0.0, look: 0, delay: Vec::new(), peaks: Vec::new(), pos: 0, gr: 0.0, input_gain: 1.0, true_peak: false, hist: Vec::new(), hpos: 0, dpos: 0 };
         l.set(-0.3, 80.0, 0.0, 3.0);
         l
+    }
+    pub fn set_true_peak(&mut self, on: bool) {
+        if on != self.true_peak {
+            self.true_peak = on;
+            // the audio delay grows by the interpolator's centre; start the lines afresh
+            self.delay.clear();
+            self.hist.clear();
+        }
+    }
+    /// Delay of the audio path: look-ahead plus the true-peak interpolator.
+    fn path(&self) -> usize {
+        self.look + if self.true_peak { TP_DELAY } else { 0 }
     }
     pub fn set(&mut self, ceiling_db: f32, release_ms: f32, input_db: f32, lookahead_ms: f32) {
         self.ceiling = db_to_gain(ceiling_db.min(0.0));
@@ -123,14 +168,39 @@ impl Limiter {
 
 impl Processor for Limiter {
     fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
-        if self.delay.len() != buf.len() {
-            self.delay = vec![vec![0.0; self.look]; buf.len()];
+        let path = self.path();
+        if self.delay.len() != buf.len() || self.delay.first().map(|d| d.len()) != Some(path) {
+            self.delay = vec![vec![0.0; path]; buf.len()];
+            self.dpos = 0;
         }
+        if self.true_peak && self.hist.len() != buf.len() {
+            self.hist = vec![[0.0; TP_TAPS]; buf.len()];
+        }
+        let coefs = tp_coefs();
         let mut max_gr = 0.0f32;
+        let mut dpos = self.dpos % path.max(1);
         for i in 0..n {
             let mut pk = 0.0f32;
-            for ch in buf.iter() {
-                pk = pk.max((ch[i] * self.input_gain).abs());
+            if self.true_peak {
+                // sample peak plus three interpolated points between the newest samples
+                for (c, ch) in buf.iter().enumerate() {
+                    let h = &mut self.hist[c];
+                    h[self.hpos] = ch[i] * self.input_gain;
+                    let mut m = h[(self.hpos + TP_TAPS - TP_DELAY) % TP_TAPS].abs();
+                    for row in coefs.iter() {
+                        let mut acc = 0.0f32;
+                        for (k, w) in row.iter().enumerate() {
+                            acc += w * h[(self.hpos + 1 + k) % TP_TAPS];
+                        }
+                        m = m.max(acc.abs());
+                    }
+                    pk = pk.max(m);
+                }
+                self.hpos = (self.hpos + 1) % TP_TAPS;
+            } else {
+                for ch in buf.iter() {
+                    pk = pk.max((ch[i] * self.input_gain).abs());
+                }
             }
             self.peaks[self.pos] = pk;
             // the window maximum over the look-ahead span
@@ -145,12 +215,14 @@ impl Processor for Limiter {
             max_gr = max_gr.max(-gain_to_db(self.gain));
             for (c, ch) in buf.iter_mut().enumerate() {
                 let d = &mut self.delay[c];
-                let out = d[self.pos];
-                d[self.pos] = ch[i] * self.input_gain;
+                let out = d[dpos];
+                d[dpos] = ch[i] * self.input_gain;
                 ch[i] = (out * self.gain).clamp(-self.ceiling, self.ceiling);
             }
             self.pos = (self.pos + 1) % self.look;
+            dpos = (dpos + 1) % path;
         }
+        self.dpos = dpos;
         self.gr = max_gr;
     }
     fn reset(&mut self) {
@@ -162,7 +234,7 @@ impl Processor for Limiter {
         self.gr
     }
     fn latency(&self) -> usize {
-        self.look
+        self.path()
     }
 }
 

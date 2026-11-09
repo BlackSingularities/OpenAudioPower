@@ -68,6 +68,7 @@ pub fn run() {
             commands::export_regions,
             commands::generate_source,
             commands::auto_duck,
+            commands::match_eq_curve,
             commands::read_text_file,
             commands::write_text_file,
             commands::export_source,

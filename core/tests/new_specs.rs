@@ -89,3 +89,41 @@ fn length_changing_ops_run() {
         assert!(out.ch.iter().flatten().all(|x| x.is_finite()), "{js}");
     }
 }
+
+/// Linear-phase EQ reports its latency, so offline rendering lines the output up with the input;
+/// a mid-only cut leaves the side signal alone.
+#[test]
+fn linear_and_mid_side_eq() {
+    use openaudiopower_core::effects::render_offline;
+    let rate = 48000.0;
+    let n = 24000;
+    let l: Vec<f32> = (0..n).map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / rate).sin()).collect();
+    let r: Vec<f32> = l.iter().map(|v| -v).collect(); // pure side signal
+    let flat: EffectSpec = serde_json::from_str(r#"{"type":"eq","linear":true,"bands":[{"kind":"peak","freq":1000,"q":1,"gain":0,"on":true}]}"#).unwrap();
+    let mut ch = vec![l.clone(), r.clone()];
+    render_offline(&mut ch, rate, &flat, 0);
+    let err = ch[0][6000..18000].iter().zip(&l[6000..18000]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(err < 0.02, "linear flat EQ misaligned: {err}");
+    // −24 dB on mid at 440 Hz must not touch a side-only signal
+    let mid: EffectSpec = serde_json::from_str(r#"{"type":"eq","bands":[{"kind":"peak","freq":440,"q":1,"gain":-24,"on":true,"target":"mid"}]}"#).unwrap();
+    let mut ch = vec![l.clone(), r.clone()];
+    render_offline(&mut ch, rate, &mid, 0);
+    let err = ch[0][6000..].iter().zip(&l[6000..]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(err < 1e-3, "mid band changed the side: {err}");
+    // the same band on the side cuts it
+    let side: EffectSpec = serde_json::from_str(r#"{"type":"eq","bands":[{"kind":"peak","freq":440,"q":1,"gain":-24,"on":true,"target":"side"}]}"#).unwrap();
+    let mut ch = vec![l.clone(), r.clone()];
+    render_offline(&mut ch, rate, &side, 0);
+    let pk = ch[0][12000..].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(pk < 0.1, "side band did not cut: {pk}");
+    for js in [
+        r#"{"type":"dynEq","shape":"bell","freq":6000,"q":2,"threshold":-30,"ratio":3,"range":-9,"attack":2,"release":120}"#,
+        r#"{"type":"imager","lowX":150,"highX":4000,"widthLow":0,"widthMid":1,"widthHigh":1.4}"#,
+        r#"{"type":"limiter","ceiling":-1,"release":80,"input":3,"lookahead":3,"truePeak":true}"#,
+    ] {
+        let spec: EffectSpec = serde_json::from_str(js).unwrap_or_else(|e| panic!("{js}: {e}"));
+        let mut ch = vec![l.clone(), r.clone()];
+        render_offline(&mut ch, rate, &spec, 0);
+        assert!(ch.iter().flatten().all(|v| v.is_finite()), "{js}");
+    }
+}

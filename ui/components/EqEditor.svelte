@@ -94,7 +94,7 @@
       ctx.font = "700 8px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(String(i + 1), x, y + 0.5);
+      ctx.fillText(b.target === "mid" ? "M" : b.target === "side" ? "S" : String(i + 1), x, y + 0.5);
     });
   });
 
@@ -165,11 +165,23 @@
       <input type="number" min="0.1" max="10" step="0.05" value={band.q} onchange={(e) => set(sel, { q: +(e.target as HTMLInputElement).value })} title="Q" />
       <button class="btn sm ghost icon" onclick={() => (onchange(bands.filter((_, j) => j !== sel)), (sel = Math.max(0, sel - 1)))} aria-label="−"><Icon name="trash" size={13} /></button>
     </div>
+    <div class="ms seg" role="group" aria-label="M/S">
+      {#each [["stereo", "L+P", "L+R"], ["mid", "Środek (M)", "Mid (M)"], ["side", "Boki (S)", "Side (S)"]] as [v, pl, en]}
+        <button class:on={(band.target ?? "stereo") === v} onclick={() => set(sel, { target: v })}>{lang.current === "pl" ? pl : en}</button>
+      {/each}
+    </div>
     <div class="units dim"><span></span><span></span><span>Hz</span><span>dB</span><span>Q</span><span></span></div>
   {/if}
 </div>
 
 <style>
+  .ms {
+    display: flex;
+  }
+  .ms button {
+    flex: 1;
+    font-size: 11px;
+  }
   .eq {
     display: flex;
     flex-direction: column;

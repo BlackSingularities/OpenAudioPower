@@ -846,6 +846,196 @@ impl Processor for Haas {
     }
 }
 
+// ───────────────────────────── dynamic EQ ─────────────────────────────
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DynShape {
+    Bell,
+    LowShelf,
+    HighShelf,
+}
+
+/// One EQ band whose gain follows the level of its own frequency range: above `threshold` it
+/// moves toward `range` dB (negative = cut, positive = boost) by `ratio`.
+pub struct DynEq {
+    rate: f32,
+    shape: DynShape,
+    freq: f32,
+    q: f32,
+    thr: f32,
+    ratio: f32,
+    range: f32,
+    att: f32,
+    rel: f32,
+    det: Biquad,
+    env_db: f32,
+    gain_db: f32,
+    eq: Vec<Biquad>,
+    k: usize,
+}
+
+impl DynEq {
+    pub fn new(rate: f32) -> Self {
+        let c = Coefs::new(FilterKind::BandPass, rate, 1000.0, 1.0, 0.0);
+        Self { rate, shape: DynShape::Bell, freq: 1000.0, q: 1.0, thr: -24.0, ratio: 3.0, range: -9.0, att: 0.0, rel: 0.0, det: Biquad::new(c), env_db: -120.0, gain_db: 0.0, eq: Vec::new(), k: 0 }
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(&mut self, shape: DynShape, freq: f32, q: f32, threshold: f32, ratio: f32, range: f32, attack: f32, release: f32) {
+        let f = freq.clamp(20.0, self.rate * 0.45);
+        let q = q.clamp(0.2, 12.0);
+        if (f - self.freq).abs() > 0.1 || (q - self.q).abs() > 1e-4 || shape != self.shape {
+            // shelves listen to the band beyond their corner, bells to the band itself
+            let (kind, df, dq) = match shape {
+                DynShape::Bell => (FilterKind::BandPass, f, q),
+                DynShape::LowShelf => (FilterKind::LowPass, f, 0.707),
+                DynShape::HighShelf => (FilterKind::HighPass, f, 0.707),
+            };
+            self.det.c = Coefs::new(kind, self.rate, df, dq, 0.0);
+        }
+        self.shape = shape;
+        self.freq = f;
+        self.q = q;
+        self.thr = threshold;
+        self.ratio = ratio.max(1.0);
+        self.range = range.clamp(-24.0, 24.0);
+        self.att = ms_to_coef(attack.max(0.1), self.rate);
+        self.rel = ms_to_coef(release.max(5.0), self.rate);
+    }
+    fn coefs(&self, g: f32) -> Coefs {
+        let kind = match self.shape {
+            DynShape::Bell => FilterKind::Peak,
+            DynShape::LowShelf => FilterKind::LowShelf,
+            DynShape::HighShelf => FilterKind::HighShelf,
+        };
+        Coefs::new(kind, self.rate, self.freq, self.q, g)
+    }
+}
+
+impl Processor for DynEq {
+    fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+        if self.eq.len() != buf.len() {
+            self.eq = vec![Biquad::new(self.coefs(self.gain_db)); buf.len()];
+        }
+        let inv = 1.0 / buf.len().max(1) as f32;
+        for i in 0..n {
+            let x = buf.iter().map(|c| c[i]).sum::<f32>() * inv;
+            let d = self.det.tick(x).abs();
+            let lvl = gain_to_db(d + 1e-9);
+            let c = if lvl > self.env_db { self.att } else { self.rel };
+            self.env_db = lvl + c * (self.env_db - lvl);
+            // refresh the band's coefficients every 16 samples
+            if self.k % 16 == 0 {
+                let over = (self.env_db - self.thr).max(0.0);
+                let amt = (over * (1.0 - 1.0 / self.ratio)).min(self.range.abs());
+                self.gain_db = amt * self.range.signum();
+                let cf = self.coefs(self.gain_db);
+                self.eq.iter_mut().for_each(|b| b.c = cf);
+            }
+            self.k = self.k.wrapping_add(1);
+            for (ch, f) in buf.iter_mut().zip(self.eq.iter_mut()) {
+                ch[i] = f.tick(ch[i]);
+            }
+        }
+    }
+    fn reset(&mut self) {
+        self.det.reset();
+        self.eq.iter_mut().for_each(|b| b.reset());
+        self.env_db = -120.0;
+    }
+    fn reduction_db(&self) -> f32 {
+        (-self.gain_db).max(0.0)
+    }
+}
+
+// ───────────────────────────── multiband stereo imager ─────────────────────────────
+
+/// Splits into low / mid / high with Linkwitz-Riley crossovers (the bands sum back to an
+/// all-pass, so the tone stays flat) and sets the stereo width of each band: 0 = mono,
+/// 1 = unchanged, 2 = twice as wide. With every width at 1 the signal passes untouched.
+pub struct Imager {
+    rate: f32,
+    lo_x: f32,
+    hi_x: f32,
+    width: [f32; 3],
+    /// per channel: low LP ×2, low HP ×2, high LP ×2, high HP ×2, all-pass for the low band ×4
+    f: Vec<[Biquad; 12]>,
+}
+
+impl Imager {
+    pub fn new(rate: f32) -> Self {
+        Self { rate, lo_x: 0.0, hi_x: 0.0, width: [1.0; 3], f: Vec::new() }
+    }
+    pub fn set(&mut self, low_x: f32, high_x: f32, widths: [f32; 3]) {
+        let lo = low_x.clamp(30.0, 1000.0);
+        let hi = high_x.clamp(lo * 1.5, 16000.0);
+        if (lo - self.lo_x).abs() > 0.5 || (hi - self.hi_x).abs() > 0.5 {
+            let q = std::f32::consts::FRAC_1_SQRT_2;
+            let c = |k, f| Biquad::new(Coefs::new(k, self.rate, f, q, 0.0));
+            let one = [
+                c(FilterKind::LowPass, lo),
+                c(FilterKind::LowPass, lo),
+                c(FilterKind::HighPass, lo),
+                c(FilterKind::HighPass, lo),
+                c(FilterKind::LowPass, hi),
+                c(FilterKind::LowPass, hi),
+                c(FilterKind::HighPass, hi),
+                c(FilterKind::HighPass, hi),
+                c(FilterKind::LowPass, hi),
+                c(FilterKind::LowPass, hi),
+                c(FilterKind::HighPass, hi),
+                c(FilterKind::HighPass, hi),
+            ];
+            self.f = vec![one.clone(), one];
+        }
+        self.lo_x = lo;
+        self.hi_x = hi;
+        self.width = widths.map(|w| w.clamp(0.0, 2.0));
+    }
+}
+
+impl Processor for Imager {
+    fn process(&mut self, buf: &mut [Vec<f32>], n: usize) {
+        if buf.len() != 2 || self.f.is_empty() || self.width.iter().all(|w| (w - 1.0).abs() < 1e-4) {
+            return;
+        }
+        let [wl, wm, wh] = self.width;
+        for i in 0..n {
+            let mut bands = [[0.0f32; 3]; 2]; // [channel][low, mid, high]
+            for (c, fs) in self.f.iter_mut().enumerate() {
+                let x = buf[c][i];
+                let t = fs[0].tick(x);
+                let low = fs[1].tick(t);
+                let t = fs[2].tick(x);
+                let rest = fs[3].tick(t);
+                let t = fs[4].tick(rest);
+                let mid = fs[5].tick(t);
+                let t = fs[6].tick(rest);
+                let high = fs[7].tick(t);
+                // the low band gets the high crossover's phase too, so the three line up
+                let t = fs[8].tick(low);
+                let a = fs[9].tick(t);
+                let t = fs[10].tick(low);
+                let b = fs[11].tick(t);
+                bands[c] = [a + b, mid, high];
+            }
+            let mut l = 0.0;
+            let mut r = 0.0;
+            for (k, w) in [wl, wm, wh].iter().enumerate() {
+                let m = (bands[0][k] + bands[1][k]) * 0.5;
+                let s = (bands[0][k] - bands[1][k]) * 0.5 * w;
+                l += m + s;
+                r += m - s;
+            }
+            buf[0][i] = l;
+            buf[1][i] = r;
+        }
+    }
+    fn reset(&mut self) {
+        self.f.iter_mut().flatten().for_each(|b| b.reset());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -937,5 +1127,88 @@ mod tests {
         let out = run(&mut p, sine(48000.0, 100.0, 4800, 0.9));
         let pk = out[0].iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(pk <= db_to_gain(-3.0) + 1e-4, "{pk}");
+    }
+
+    #[test]
+    fn dyn_eq_cuts_only_when_loud() {
+        let rate = 48000.0;
+        let tone = |a: f32| -> Vec<Vec<f32>> { let v: Vec<f32> = (0..48000).map(|i| a * (TAU * 6000.0 * i as f32 / rate).sin()).collect(); vec![v.clone(), v] };
+        let mut d = DynEq::new(rate);
+        d.set(DynShape::Bell, 6000.0, 2.0, -30.0, 4.0, -12.0, 1.0, 100.0);
+        let mut quiet = tone(0.005);
+        d.process(&mut quiet, 48000);
+        let mut d2 = DynEq::new(rate);
+        d2.set(DynShape::Bell, 6000.0, 2.0, -30.0, 4.0, -12.0, 1.0, 100.0);
+        let mut loud = tone(0.5);
+        d2.process(&mut loud, 48000);
+        let pk = |b: &[Vec<f32>]| b[0][24000..].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((pk(&quiet) / 0.005 - 1.0).abs() < 0.1, "quiet {}", pk(&quiet));
+        assert!(pk(&loud) / 0.5 < 0.4, "loud {}", pk(&loud));
+    }
+
+    #[test]
+    fn imager_keeps_tone_and_monos_bass() {
+        let rate = 48000.0;
+        let n = 48000;
+        let sig = |f: f32, ph: f32| -> Vec<f32> { (0..n).map(|i| (TAU * f * i as f32 / rate + ph).sin()).collect() };
+        let rms = |x: &[f32]| (x[n / 2..].iter().map(|v| v * v).sum::<f32>() / (n / 2) as f32).sqrt();
+        // flat magnitude through the crossovers at several frequencies
+        for f in [60.0, 150.0, 1000.0, 3000.0, 9000.0] {
+            let mut im = Imager::new(rate);
+            im.set(150.0, 3000.0, [1.0, 1.0, 0.999]);
+            let x = sig(f, 0.0);
+            let mut b = vec![x.clone(), x.clone()];
+            im.process(&mut b, n);
+            let g = rms(&b[0]) / rms(&x);
+            assert!((g - 1.0).abs() < 0.03, "{f} Hz gain {g}");
+        }
+        // anti-phase bass becomes mono (side cancels), anti-phase treble stays wide
+        let mut im = Imager::new(rate);
+        im.set(150.0, 3000.0, [0.0, 1.0, 1.0]);
+        let mut b = vec![sig(60.0, 0.0), sig(60.0, std::f32::consts::PI)];
+        im.process(&mut b, n);
+        assert!(rms(&b[0]) < 0.1, "bass side left {}", rms(&b[0]));
+        let mut im = Imager::new(rate);
+        im.set(150.0, 3000.0, [0.0, 1.0, 1.0]);
+        let mut b = vec![sig(8000.0, 0.0), sig(8000.0, std::f32::consts::PI)];
+        im.process(&mut b, n);
+        assert!(rms(&b[0]) > 0.6, "treble kept {}", rms(&b[0]));
+    }
+
+    #[test]
+    fn true_peak_limiter_catches_intersample_peaks() {
+        use crate::dsp::dynamics::Limiter;
+        let rate = 48000.0;
+        // a quarter-rate tone sampled at 45°: samples read 0.707·A, the real peak is A
+        let x: Vec<f32> = (0..48000).map(|i| (TAU * 12000.0 * i as f32 / rate + std::f32::consts::FRAC_PI_4).sin()).collect();
+        let tp = |b: &[f32]| {
+            // reference true peak by 16× sinc interpolation
+            let mut m = 0.0f32;
+            for i in 24000..24400 {
+                for k in 0..16 {
+                    let t = i as f32 + k as f32 / 16.0;
+                    let mut acc = 0.0;
+                    for j in (i - 32)..(i + 32) {
+                        let d = t - j as f32;
+                        acc += b[j] * if d.abs() < 1e-6 { 1.0 } else { (std::f32::consts::PI * d).sin() / (std::f32::consts::PI * d) };
+                    }
+                    m = m.max(acc.abs());
+                }
+            }
+            m
+        };
+        let run = |on: bool| {
+            let mut l = Limiter::new(rate);
+            l.set_true_peak(on);
+            l.set(-6.0, 50.0, 0.0, 3.0);
+            let mut b = vec![x.clone()];
+            l.process(&mut b, 48000);
+            tp(&b[0])
+        };
+        let ceiling = 10f32.powf(-6.0 / 20.0);
+        let off = run(false);
+        let on = run(true);
+        assert!(off > ceiling * 1.2, "sample-peak limiter overshoots: {off}");
+        assert!(on < ceiling * 1.05, "true-peak limiter holds the ceiling: {on}");
     }
 }

@@ -198,6 +198,8 @@ export const api = {
   exportMix: (path: string, project: unknown, options: unknown) => invoke<void>("export_mix", { path, project, options }),
   exportTracks: (dir: string, project: unknown, options: unknown) => invoke<string[]>("export_tracks", { dir, project, options }),
   exportRegions: (dir: string, project: unknown, regions: { name: string; start: number; end: number }[], options: unknown) => invoke<string[]>("export_regions", { dir, project, regions, options }),
+  matchEqCurve: (id: number, start: number, end: number, reference: number, refStart: number, refEnd: number, smoothing: number) =>
+    invoke<[number, number][]>("match_eq_curve", { id, start, end, reference, refStart, refEnd, smoothing }),
   autoDuck: (project: unknown, control: number, start: number, end: number, threshold: number, duck: number, fall: number, rise: number, hold: number) =>
     invoke<{ t: number; v: number }[]>("auto_duck", { project, control, start, end, threshold, duck, fall, rise, hold }),
   generateSource: (spec: unknown, seconds: number, stereo: boolean, name: string) => invoke<SourceInfo>("generate_source", { spec, seconds, stereo, name }),

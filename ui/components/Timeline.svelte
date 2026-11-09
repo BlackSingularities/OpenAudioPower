@@ -910,6 +910,7 @@
         { label: t("spectralTitle") + "…", icon: "chart", run: () => openSpectral(h.clip.id) },
         { label: t("remixTitle") + "…", icon: "sliders", run: () => ((ed.selClips = [h.clip.id]), openRemix()) },
         { label: "Normalizacja / Normalise −1 dB", icon: "wand", run: () => applyOp({ op: "normalize", mode: "peak", target: -1, perChannel: false }, false) },
+        { label: "Match EQ…", icon: "chart", run: () => (app.dialogs.match = true) },
         { label: t("analyze"), icon: "chart", run: () => (ed.inspectorTab = "analysis") },
         { label: t("muteClip"), icon: "mute", run: () => commit(() => (findClip(h.clip.id)!.clip.muted = !h.clip.muted)) },
         { sep: true },

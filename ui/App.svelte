@@ -23,6 +23,7 @@
   import HistoryDialog from "./components/HistoryDialog.svelte";
   import TimerDialog from "./components/TimerDialog.svelte";
   import DuckDialog from "./components/DuckDialog.svelte";
+  import MatchDialog from "./components/MatchDialog.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import Tooltip from "./components/Tooltip.svelte";
@@ -407,6 +408,7 @@
 <HistoryDialog />
 <TimerDialog />
 <DuckDialog />
+<MatchDialog />
 <UpdateBanner bind:hidden={updHidden} />
 <ContextMenu />
 <Tooltip />

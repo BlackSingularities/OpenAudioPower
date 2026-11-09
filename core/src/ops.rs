@@ -73,6 +73,8 @@ pub enum Op {
     /// pitch change, like Audacity's Set Rate); otherwise it is converted to `rate` and back,
     /// which limits the bandwidth (e.g. 8000 Hz telephone sound).
     Resample { rate: u32, #[serde(default)] reinterpret: bool },
+    /// Match EQ: a correction curve (Hz, dB) applied with a linear-phase filter.
+    MatchEq { curve: Vec<[f32; 2]>, #[serde(default = "one")] amount: f32 },
     /// Pencil: replaces the range with these sample values (all channels).
     Draw { values: Vec<f32> },
     #[serde(rename_all = "camelCase")]
@@ -91,6 +93,10 @@ pub enum Op {
     /// Spectral repair of the range between two frequencies.
     #[serde(rename_all = "camelCase")]
     SpectralRepair { f_lo: f32, f_hi: f32, mode: crate::enhance::RepairMode, #[serde(default)] gain: f32 },
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 fn room_default() -> f32 {
@@ -332,6 +338,13 @@ pub fn apply(src: &AudioBuffer, start: usize, end: usize, op: &Op, cancel: &Canc
                 }
                 p
             }
+        }
+        Op::MatchEq { curve, amount } => {
+            let mut p = crate::matcheq::apply(&part, curve, *amount);
+            if !whole {
+                blend_edges(&part, &mut p, edge);
+            }
+            p
         }
         Op::Draw { values } => {
             let mut p = part;

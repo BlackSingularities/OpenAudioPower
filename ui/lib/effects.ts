@@ -49,7 +49,13 @@ export const defaultEqBands = () => [
 ];
 
 export const EFFECTS: EffectDef[] = [
-  { type: "eq", label: ["Korektor parametryczny", "Parametric EQ"], group: "eq", params: [], defaults: { bands: defaultEqBands() } },
+  {
+    type: "eq",
+    label: ["Korektor parametryczny", "Parametric EQ"],
+    group: "eq",
+    params: [{ key: "linear", label: ["Liniowa faza (mastering, opóźnienie ~0,1 s)", "Linear phase (mastering, ~0.1 s latency)"], kind: "bool" }],
+    defaults: { bands: defaultEqBands(), linear: false },
+  },
   {
     type: "filter",
     label: ["Filtr", "Filter"],
@@ -81,8 +87,14 @@ export const EFFECTS: EffectDef[] = [
     type: "limiter",
     label: ["Limiter", "Limiter"],
     group: "dyn",
-    params: [db("input", ["Wejście", "Input"], 0, 24), db("ceiling", ["Sufit", "Ceiling"], -12, 0), ms("release", ["Zwolnienie", "Release"], 5, 1000), ms("lookahead", ["Wyprzedzenie", "Look-ahead"], 0.5, 10, false)],
-    defaults: { input: 0, ceiling: -1, release: 80, lookahead: 3 },
+    params: [
+      db("input", ["Wejście", "Input"], 0, 24),
+      db("ceiling", ["Sufit", "Ceiling"], -12, 0),
+      ms("release", ["Zwolnienie", "Release"], 5, 1000),
+      ms("lookahead", ["Wyprzedzenie", "Look-ahead"], 0.5, 10, false),
+      { key: "truePeak", label: ["True peak (szczyty między próbkami, dBTP)", "True peak (inter-sample peaks, dBTP)"], kind: "bool" },
+    ],
+    defaults: { input: 0, ceiling: -1, release: 80, lookahead: 3, truePeak: true },
   },
   {
     type: "gate",
@@ -204,6 +216,44 @@ const FILTER_MODES: { value: string; label: L }[] = [
 const modeParam: Param = { key: "mode", label: ["Typ", "Type"], kind: "select", options: FILTER_MODES };
 
 EFFECTS.push(
+  {
+    type: "dynEq",
+    label: ["Korektor dynamiczny", "Dynamic EQ"],
+    group: "eq",
+    params: [
+      {
+        key: "shape",
+        label: ["Kształt", "Shape"],
+        kind: "select",
+        options: [
+          { value: "bell", label: ["Dzwon", "Bell"] },
+          { value: "lowShelf", label: ["Półka niska", "Low shelf"] },
+          { value: "highShelf", label: ["Półka wysoka", "High shelf"] },
+        ],
+      },
+      hz("freq", ["Częstotliwość", "Frequency"]),
+      { key: "q", label: ["Dobroć Q", "Q"], min: 0.2, max: 12, step: 0.01, log: true },
+      db("threshold", ["Próg", "Threshold"], -70, 0),
+      { key: "ratio", label: ["Stosunek", "Ratio"], min: 1, max: 20, step: 0.1, unit: ":1", log: true },
+      db("range", ["Zakres (− tnie, + podbija)", "Range (− cut, + boost)"], -24, 24),
+      ms("attack", ["Atak", "Attack"], 0.1, 200),
+      ms("release", ["Zwolnienie", "Release"], 5, 2000),
+    ],
+    defaults: { shape: "bell", freq: 6500, q: 2, threshold: -30, ratio: 3, range: -9, attack: 2, release: 120 },
+  },
+  {
+    type: "imager",
+    label: ["Imager stereo w pasmach", "Multiband stereo imager"],
+    group: "util",
+    params: [
+      hz("lowX", ["Podział niski", "Low crossover"], 30, 1000),
+      hz("highX", ["Podział wysoki", "High crossover"], 500, 16000),
+      { key: "widthLow", label: ["Szerokość – bas (0 = mono)", "Width – low (0 = mono)"], min: 0, max: 2, step: 0.01, unit: "×" },
+      { key: "widthMid", label: ["Szerokość – środek", "Width – mid"], min: 0, max: 2, step: 0.01, unit: "×" },
+      { key: "widthHigh", label: ["Szerokość – góra", "Width – high"], min: 0, max: 2, step: 0.01, unit: "×" },
+    ],
+    defaults: { lowX: 150, highX: 4000, widthLow: 0, widthMid: 1, widthHigh: 1.3 },
+  },
   {
     type: "ladder",
     label: ["Filtr analogowy (ladder)", "Ladder filter"],
@@ -395,7 +445,8 @@ export const PRESETS: { id: string; label: L; chain: () => any[] }[] = [
         { kind: "highShelf", freq: 12000, q: 0.707, gain: 1.5, on: true },
       ] },
       { type: "compressor", threshold: -14, ratio: 2, attack: 30, release: 200, knee: 8, makeup: 2, mix: 1 },
-      { type: "limiter", input: 4, ceiling: -1, release: 80, lookahead: 4 },
+      { type: "imager", lowX: 150, highX: 4000, widthLow: 0, widthMid: 1, widthHigh: 1.15 },
+      { type: "limiter", input: 4, ceiling: -1, release: 80, lookahead: 4, truePeak: true },
     ],
   },
   {

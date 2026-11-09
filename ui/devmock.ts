@@ -107,6 +107,7 @@ export function installDevMock() {
       return { sources: [s], errors: [] };
     },
     clear_sources: () => null,
+    match_eq_curve: () => Array.from({ length: 110 }, (_, i) => { const f = 20 * Math.pow(2, i / 12); return [f, 4 * Math.sin(i / 14) + (f > 6000 ? 3 : 0)]; }),
     auto_duck: (a) => [{ t: a.start + 48000, v: 0 }, { t: a.start + 60000, v: a.duck }, { t: a.start + 400000, v: a.duck }, { t: a.start + 430000, v: 0 }],
     generate_source: (a) => {
       const s = { ...mkSource(2000 + sources.length, a.name, a.seconds), kind: "generated" };
