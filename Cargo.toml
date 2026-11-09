@@ -1,9 +1,9 @@
 [workspace]
-members = ["core", "src-tauri"]
+members = ["core", "src-tauri", "plughost", "testplug"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 
 [profile.release]
 opt-level = 3

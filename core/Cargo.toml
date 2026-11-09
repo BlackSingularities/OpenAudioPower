@@ -17,9 +17,18 @@ realfft = "3.5"
 rustfft = "6.4"
 hound = "3.5"
 flacenc = "0.5"
+mp3lame-encoder = "0.3"
+vorbis_rs = "0.5"
+unsafe-libopus = "0.2"
+ogg = "0.9"
+deep-filter-rt = "0.2"
+ndarray = "0.17"
 ebur128 = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rayon = "1.10"
 ureq = "2.12"
 ort = { version = "=2.0.0-rc.10", optional = true, features = ["directml"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_Foundation"] }

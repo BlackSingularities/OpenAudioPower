@@ -56,6 +56,23 @@ export function installDevMock() {
     },
     spectrum: (a) => Array.from({ length: a.bands }, (_, i) => (playing ? -20 - i * 0.35 - Math.random() * 12 : -110)),
     source_peaks: (a) => peaks(a.id),
+    // fake spectrogram: pink-ish noise floor, harmonic voice-like bands and a short 3 kHz beep
+    spectrogram: (a) => {
+      const w = a.width, h = a.height;
+      const img = new Uint8Array(w * h);
+      for (let x = 0; x < w; x++) {
+        const t = (a.start + ((a.end - a.start) * x) / w) / rate;
+        for (let y = 0; y < h; y++) {
+          const hz = 30 * Math.pow(24000 / 30, 1 - y / h);
+          let db = -78 - 10 * Math.log10(hz / 100) + Math.random() * 8;
+          const f0 = 160 + 40 * Math.sin(t * 2.1);
+          for (let k = 1; k < 18; k++) if (Math.abs(hz - f0 * k) < f0 * 0.04) db = Math.max(db, -30 - k * 2.2 + 10 * Math.sin(t * 3 + k));
+          if (Math.abs(hz - 3000) < 90 && t % 20 > 9 && t % 20 < 9.8) db = -12;
+          img[y * w + x] = Math.max(0, Math.min(255, ((db + 100) / 100) * 255));
+        }
+      }
+      return img.buffer;
+    },
     source_samples: () => new ArrayBuffer(8),
     source_bands: (a) => {
       const s = sources.find((x) => x.id === a.id) ?? { frames: rate * 30 };
@@ -100,6 +117,27 @@ export function installDevMock() {
       });
       return { stems: out, device: "CPU", seconds: 3.2 };
     },
+    // processing: a new edit of the same length that keeps stem / parent like the real backend
+    apply_op: (a) => {
+      const src = sources.find((s) => s.id === a.id)!;
+      const s = { ...mkSource(1000 + sources.length, src.name, src.duration, src.stem, src.parent ?? src.id), kind: "edit" };
+      sources.push(s);
+      return s;
+    },
+    // plug-ins: a few fake effects, one file that failed to load and one instrument
+    plugin_dirs: () => ["C:\\Program Files\\Common Files\\VST3", "C:\\Program Files\\Common Files\\CLAP"],
+    plugin_scan: () => [
+      { file: "C:\\Program Files\\Common Files\\VST3\\FabFilter Pro-Q 3.vst3", stamp: "", error: null, plugins: [{ format: "vst3", path: "x", id: "a", name: "Pro-Q 3", vendor: "FabFilter", version: "3.2", category: "Fx|EQ", instrument: false }] },
+      { file: "C:\\Program Files\\Common Files\\VST3\\ValhallaRoom.vst3", stamp: "", error: null, plugins: [{ format: "vst3", path: "y", id: "b", name: "ValhallaRoom", vendor: "Valhalla DSP", version: "1.6", category: "Fx|Reverb", instrument: false }] },
+      { file: "C:\\Program Files\\Common Files\\CLAP\\Surge XT Effects.clap", stamp: "", error: null, plugins: [{ format: "clap", path: "z", id: "c", name: "Surge XT Effects", vendor: "Surge Synth Team", version: "1.3", category: "audio-effect|multi-effects", instrument: false }, { format: "clap", path: "z", id: "d", name: "Surge XT", vendor: "Surge Synth Team", version: "1.3", category: "instrument|synthesizer", instrument: true }] },
+      { file: "C:\\Program Files\\Common Files\\VST3\\Old.vst3", stamp: "", error: "crashed while loading", plugins: [] },
+    ],
+    plugin_create: (a) => ({ name: a.desc.name, hasEditor: true, latency: 0 }),
+    plugin_editor: () => null,
+    plugin_states: () => ({}),
+    plugin_retain: () => null,
+    plugin_status: () => [],
+    plugin_restart: () => ({ name: "", hasEditor: true, latency: 0 }),
     input_monitor: () => null,
     "plugin:event|listen": () => 1,
     "plugin:event|unlisten": () => null,

@@ -43,11 +43,45 @@ pub enum EffectSpec {
     BitCrusher { bits: f32, downsample: usize, mix: f32 },
     #[serde(rename_all = "camelCase")]
     Stereo { gain: f32, pan: f32, width: f32, invert_l: bool, invert_r: bool, mono: bool },
+    /// A VST3 / CLAP plug-in running in `oap-plughost`. `instance` names the running helper;
+    /// the rest lets a project start it again (`state` is the plug-in's own blob, base64).
+    #[serde(rename_all = "camelCase")]
+    Plugin {
+        instance: u64,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        format: String,
+        #[serde(default)]
+        path: String,
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        state: String,
+    },
+}
+
+/// Creates the processor of a plug-in slot (registered by the app, which owns the helper
+/// processes). Without it, or for an instance that is not running, the slot passes audio through.
+pub type ExternalFactory = fn(instance: u64) -> Option<Box<dyn Processor>>;
+static EXTERNAL: std::sync::OnceLock<ExternalFactory> = std::sync::OnceLock::new();
+
+pub fn set_external_factory(f: ExternalFactory) {
+    let _ = EXTERNAL.set(f);
+}
+
+struct Passthrough;
+impl Processor for Passthrough {
+    fn process(&mut self, _buf: &mut [Vec<f32>], _n: usize) {}
 }
 
 impl EffectSpec {
     fn kind(&self) -> std::mem::Discriminant<EffectSpec> {
         std::mem::discriminant(self)
+    }
+
+    fn instance(&self) -> u64 {
+        if let EffectSpec::Plugin { instance, .. } = self { *instance } else { 0 }
     }
 }
 
@@ -79,6 +113,7 @@ enum Proc {
     Sat(Saturator),
     Crush(BitCrusher),
     Stereo(StereoTool),
+    Ext(Box<dyn Processor>),
 }
 
 impl Proc {
@@ -98,6 +133,7 @@ impl Proc {
             EffectSpec::Saturation { .. } => Proc::Sat(Saturator::new(rate)),
             EffectSpec::BitCrusher { .. } => Proc::Crush(BitCrusher::new()),
             EffectSpec::Stereo { .. } => Proc::Stereo(StereoTool::new()),
+            EffectSpec::Plugin { instance, .. } => Proc::Ext(EXTERNAL.get().and_then(|f| f(*instance)).unwrap_or_else(|| Box::new(Passthrough))),
         };
         p.update(spec);
         p
@@ -144,6 +180,7 @@ impl Proc {
             Proc::Sat(p) => p,
             Proc::Crush(p) => p,
             Proc::Stereo(p) => p,
+            Proc::Ext(p) => p.as_mut(),
         }
     }
 }
@@ -169,7 +206,7 @@ impl Chain {
 
     /// Bring the chain in line with `specs`, reusing processors whose id and type match.
     pub fn sync(&mut self, specs: &[EffectSlot]) {
-        let same_layout = specs.len() == self.slots.len() && specs.iter().zip(&self.slots).all(|(a, b)| a.id == b.id && a.spec.kind() == b.kind);
+        let same_layout = specs.len() == self.slots.len() && specs.iter().zip(&self.slots).all(|(a, b)| a.id == b.id && a.spec.kind() == b.kind && a.spec.instance() == b.spec.instance());
         if same_layout {
             for (a, b) in specs.iter().zip(self.slots.iter_mut()) {
                 b.on = a.on;
@@ -182,7 +219,7 @@ impl Chain {
         }
         let mut old: Vec<Slot> = std::mem::take(&mut self.slots);
         for a in specs {
-            if let Some(i) = old.iter().position(|b| b.id == a.id && b.kind == a.spec.kind()) {
+            if let Some(i) = old.iter().position(|b| b.id == a.id && b.kind == a.spec.kind() && b.spec.instance() == a.spec.instance()) {
                 let mut s = old.swap_remove(i);
                 s.on = a.on;
                 if s.spec != a.spec {

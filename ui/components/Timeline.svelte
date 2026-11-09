@@ -13,6 +13,9 @@
     seek, snapFrame, framesPerBeat, zoomAt, projectLength, splitAt, deleteSelected, duplicateSelected, copySelected, paste,
     addTrackCmd, addSourceToTrack, addSourceToNewTrack, openStemDialog, applyOp, setDraggingPlayhead, addMarker, deleteRange,
     cropToRange, bounceRange, toggleLoop, type Clip, type Track,
+    autoOf, envelopeAt, AUTO_RANGE, type AutoLane, type AutoPoint,
+    openSpectral,
+    openRemix,
   } from "../lib/store.svelte";
 
   const HEADER_W = 214;
@@ -26,6 +29,8 @@
   let dpr = window.devicePixelRatio || 1;
   let hover = $state<{ clip: number; zone: string } | null>(null);
   let dropHint = $state<{ track: number | null; frame: number; y: number } | null>(null);
+  /** automation point under the mouse or being dragged */
+  let autoHot = $state<{ track: number; i: number } | null>(null);
 
   const totalH = $derived(P.p.tracks.reduce((a, x) => a + x.height, 0));
   const xOf = (f: number) => (f - ed.scroll) / ed.fpp;
@@ -158,6 +163,7 @@
         const dim = tr.mute || (anySolo && !tr.solo);
         for (const c of tr.clips) drawClip(ctx, tr, c, y, h, dim);
         if (tp.recording && tr.armed) drawRecording(ctx, y, h);
+        if (tr.auto && tr.auto.show !== "off") drawAuto(ctx, tr, tr.auto.show, y, h);
       }
       y += h;
     }
@@ -200,6 +206,150 @@
       ctx.fillStyle = alpha(accent, 0.9);
       ctx.fillRect(xOf(dropHint.frame), 0, 2, H);
     }
+  }
+
+  // ─────────────── automation ───────────────
+
+  const AUTO_PAD = 9;
+  const AUTO_COLOR = "#fbbf24";
+  function autoY(lane: AutoLane, v: number, top: number, h: number) {
+    const r = AUTO_RANGE[lane];
+    const k = (Math.min(r.max, Math.max(r.min, v)) - r.min) / (r.max - r.min);
+    return top + AUTO_PAD + (1 - k) * (h - 2 * AUTO_PAD);
+  }
+  function autoV(lane: AutoLane, y: number, top: number, h: number) {
+    const r = AUTO_RANGE[lane];
+    const k = 1 - (y - top - AUTO_PAD) / Math.max(1, h - 2 * AUTO_PAD);
+    const v = r.min + Math.min(1, Math.max(0, k)) * (r.max - r.min);
+    return lane === "pan" ? Math.round(v * 100) / 100 : Math.round(v * 10) / 10;
+  }
+  function autoLabel(lane: AutoLane, v: number) {
+    if (lane === "volume") return `${v > 0 ? "+" : ""}${v.toFixed(1)} dB`;
+    return Math.abs(v) < 0.005 ? "C" : `${v < 0 ? "L" : "R"}${Math.round(Math.abs(v) * 100)}`;
+  }
+
+  function drawAuto(ctx: CanvasRenderingContext2D, tr: Track, lane: AutoLane, top: number, h: number) {
+    const pts = tr.auto![lane];
+    const def = AUTO_RANGE[lane].def(tr);
+    // dim the clips so the envelope reads clearly
+    ctx.fillStyle = "rgba(8,6,16,0.42)";
+    ctx.fillRect(0, top, W, h - 1);
+    // reference line: 0 dB or centre
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    const ry = Math.round(autoY(lane, 0, top, h)) + 0.5;
+    ctx.moveTo(0, ry);
+    ctx.lineTo(W, ry);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // envelope polyline across the view
+    ctx.strokeStyle = AUTO_COLOR;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(0, autoY(lane, envelopeAt(pts, fOf(0), def), top, h));
+    for (const p of pts) {
+      const x = xOf(p.t);
+      if (x < -50 || x > W + 50) continue;
+      ctx.lineTo(x, autoY(lane, p.v, top, h));
+    }
+    ctx.lineTo(W, autoY(lane, envelopeAt(pts, fOf(W), def), top, h));
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    // translucent fill under the line
+    ctx.lineTo(W, top + h - 1);
+    ctx.lineTo(0, top + h - 1);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(251,191,36,0.07)";
+    ctx.fill();
+    // points
+    pts.forEach((p, i) => {
+      const x = xOf(p.t);
+      if (x < -6 || x > W + 6) return;
+      const y = autoY(lane, p.v, top, h);
+      const hot = autoHot?.track === tr.id && autoHot.i === i;
+      ctx.beginPath();
+      ctx.arc(x, y, hot ? 5 : 3.6, 0, Math.PI * 2);
+      ctx.fillStyle = hot ? "#fff" : AUTO_COLOR;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.stroke();
+      if (hot) {
+        const label = autoLabel(lane, p.v);
+        ctx.font = "600 11px Inter, system-ui, sans-serif";
+        const tw = ctx.measureText(label).width + 10;
+        const lx = Math.min(W - tw - 2, x + 8);
+        const ly = Math.max(top + 2, y - 22);
+        ctx.fillStyle = "rgba(10,8,20,0.85)";
+        rr(ctx, lx, ly, tw, 17, 5);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, lx + 5, ly + 12.5);
+      }
+    });
+    // caption
+    ctx.font = "600 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(251,191,36,0.85)";
+    ctx.fillText(lane === "volume" ? t("autoVolume") : t("autoPan"), 8, top + h - 8);
+  }
+
+  /** Automation lane under `y` with the nearest point within reach of (x, y). */
+  function autoHit(x: number, y: number): { tr: Track; lane: AutoLane; top: number; i: number } | null {
+    const ta = trackAt(y);
+    if (!ta || !ta.tr.auto || ta.tr.auto.show === "off") return null;
+    const lane = ta.tr.auto.show;
+    const pts = ta.tr.auto[lane];
+    let best = -1;
+    let bd = 8;
+    pts.forEach((p, i) => {
+      const d = Math.hypot(xOf(p.t) - x, autoY(lane, p.v, ta.top, ta.tr.height) - y);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return { tr: ta.tr, lane, top: ta.top, i: best };
+  }
+
+  /** Pointer down on an automation lane: grab a point or add one, then drag it (Shift: value only). */
+  function autoDown(e: PointerEvent, ah: { tr: Track; lane: AutoLane; top: number; i: number }, snapF: (f: number) => number) {
+    const id = ah.tr.id;
+    const lane = ah.lane;
+    const { x, y } = localXY(e);
+    beginGesture();
+    let i = ah.i;
+    if (i < 0) {
+      const pts = autoOf(getTrack(id)!)[lane];
+      const pt: AutoPoint = { t: Math.max(0, snapF(fOf(x))), v: autoV(lane, y, ah.top, ah.tr.height) };
+      i = pts.findIndex((p) => p.t > pt.t);
+      if (i < 0) i = pts.length;
+      pts.splice(i, 0, pt);
+      syncEngine();
+    }
+    autoHot = { track: id, i };
+    laneCv!.setPointerCapture(e.pointerId);
+    dragging = true;
+    const mv = (ev: PointerEvent) => {
+      const tr = getTrack(id);
+      if (!tr?.auto) return;
+      const pts = tr.auto[lane];
+      const r = laneCv!.getBoundingClientRect();
+      const lo = i > 0 ? pts[i - 1].t + 1 : 0;
+      const hi = i < pts.length - 1 ? pts[i + 1].t - 1 : Number.MAX_SAFE_INTEGER;
+      if (!ev.shiftKey) pts[i].t = Math.min(hi, Math.max(lo, snapF(fOf(ev.clientX - r.left))));
+      pts[i].v = autoV(lane, ev.clientY - r.top, ah.top, tr.height);
+      syncEngine();
+      schedule();
+    };
+    const up = () => {
+      dragging = false;
+      laneCv?.releasePointerCapture(e.pointerId);
+      laneCv?.removeEventListener("pointermove", mv);
+      laneCv?.removeEventListener("pointerup", up);
+      endGesture();
+    };
+    laneCv!.addEventListener("pointermove", mv);
+    laneCv!.addEventListener("pointerup", up);
   }
 
   function drawClip(ctx: CanvasRenderingContext2D, tr: Track, c: Clip, y: number, h: number, dim: boolean) {
@@ -436,6 +586,21 @@
   function onMove(e: PointerEvent) {
     if (dragging) return;
     const { x, y } = localXY(e);
+    const ah = autoHit(x, y);
+    if (ah) {
+      const nh = ah.i >= 0 ? { track: ah.tr.id, i: ah.i } : null;
+      if (nh?.track !== autoHot?.track || nh?.i !== autoHot?.i) {
+        autoHot = nh;
+        schedule();
+      }
+      if (hover) hover = null;
+      laneCv!.style.cursor = ah.i >= 0 ? "move" : "crosshair";
+      return;
+    }
+    if (autoHot) {
+      autoHot = null;
+      schedule();
+    }
     const h = hit(x, y);
     const nh = h ? { clip: h.clip.id, zone: h.zone } : null;
     if (nh?.clip !== hover?.clip || nh?.zone !== hover?.zone) hover = nh;
@@ -454,6 +619,11 @@
     const startF = fOf(x);
     const noSnap = e.ctrlKey;
     const snapF = (f: number) => (noSnap ? Math.round(f) : snapFrame(f));
+    const ah = autoHit(x, y);
+    if (ah) {
+      autoDown(e, ah, snapF);
+      return;
+    }
     laneCv!.setPointerCapture(e.pointerId);
     dragging = true;
     let moved = false;
@@ -565,6 +735,14 @@
 
   function onDbl(e: MouseEvent) {
     const { x, y } = localXY(e);
+    const ah = autoHit(x, y);
+    if (ah) {
+      if (ah.i >= 0) {
+        commit(() => autoOf(getTrack(ah.tr.id)!)[ah.lane].splice(ah.i, 1));
+        autoHot = null;
+      }
+      return;
+    }
     const h = hit(x, y);
     if (h) ed.sel = { start: h.clip.start, end: h.clip.start + h.clip.len };
   }
@@ -582,6 +760,8 @@
         { label: t("cut"), icon: "scissors", hint: "Ctrl+X", run: () => copySelected(true) },
         { sep: true },
         { label: t("stemSeparation"), icon: "stems", run: () => openStemDialog() },
+        { label: t("spectralTitle") + "…", icon: "chart", run: () => openSpectral(h.clip.id) },
+        { label: t("remixTitle") + "…", icon: "sliders", run: () => ((ed.selClips = [h.clip.id]), openRemix()) },
         { label: "Normalizacja / Normalise −1 dB", icon: "wand", run: () => applyOp({ op: "normalize", mode: "peak", target: -1, perChannel: false }, false) },
         { label: t("analyze"), icon: "chart", run: () => (ed.inspectorTab = "analysis") },
         { label: t("muteClip"), icon: "mute", run: () => commit(() => (findClip(h.clip.id)!.clip.muted = !h.clip.muted)) },

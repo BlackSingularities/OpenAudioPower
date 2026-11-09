@@ -10,6 +10,9 @@
     S, P, app, ed, hist, persist, newProject, openProject, saveProject, pickImport, pickImportFolder, undo, redo, copySelected, paste,
     duplicateSelected, deleteSelected, splitAt, selectAll, deleteRange, cropToRange, bounceRange, zoomAt, zoomFit, addTrackCmd,
     removeTrack, separateCmd, addMarker, toggleLoop,
+    openSpectral,
+    openRemix,
+    karaoke,
   } from "../lib/store.svelte";
 
   let { onUpdateCheck, onQuit }: { onUpdateCheck: () => void; onQuit: () => void } = $props();
@@ -107,7 +110,11 @@
       id: "tools",
       items: () => [
         { label: t("stemSeparation"), icon: "stems", hint: "Ctrl+Shift+E", run: separateCmd },
+        { label: t("remixTitle") + "…", icon: "sliders", hint: "Ctrl+Shift+M", run: () => openRemix() },
+        { label: t("remixKaraokeCmd"), icon: "mic", hint: "Ctrl+Shift+K", run: karaoke },
         { label: t("tabProcess"), icon: "wand", run: () => ((S.settings.ui.inspector = true), (ed.inspectorTab = "process")) },
+        { label: t("spectralTitle") + "…", icon: "chart", hint: "Ctrl+Shift+R", run: () => openSpectral() },
+        { label: t("batchTitle") + "…", icon: "folder", hint: "Ctrl+B", run: () => (app.dialogs.batch = true) },
         { label: t("tabAnalysis"), icon: "chart", run: () => ((S.settings.ui.inspector = true), (ed.inspectorTab = "analysis")) },
         { label: t("tabMaster"), icon: "sliders", run: () => ((S.settings.ui.inspector = true), (ed.inspectorTab = "master")) },
       ],

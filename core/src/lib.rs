@@ -7,6 +7,7 @@ pub mod decode;
 pub mod dsp;
 pub mod effects;
 pub mod encode;
+pub mod enhance;
 pub mod mix;
 pub mod ops;
 pub mod peaks;

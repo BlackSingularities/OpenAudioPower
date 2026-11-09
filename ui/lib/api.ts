@@ -117,6 +117,23 @@ export interface Bands {
   data: Float32Array; // [rms, low, mid, high] per bin
 }
 
+export interface PluginDesc {
+  format: "vst3" | "clap" | string;
+  path: string;
+  id: string;
+  name: string;
+  vendor: string;
+  version: string;
+  category: string;
+  instrument: boolean;
+}
+export interface PluginScanEntry {
+  file: string;
+  stamp: string;
+  plugins: PluginDesc[];
+  error: string | null;
+}
+
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   systemLanguage: () => invoke<string>("system_language"),
@@ -181,6 +198,17 @@ export const api = {
   exportMix: (path: string, project: unknown, options: unknown) => invoke<void>("export_mix", { path, project, options }),
   exportTracks: (dir: string, project: unknown, options: unknown) => invoke<string[]>("export_tracks", { dir, project, options }),
   exportSource: (id: number, path: string, options: unknown) => invoke<void>("export_source", { id, path, options }),
+  pluginDirs: () => invoke<string[]>("plugin_dirs"),
+  pluginScan: (dirs: string[], full: boolean) => invoke<PluginScanEntry[]>("plugin_scan", { dirs, full }),
+  pluginCreate: (instance: number, desc: PluginDesc, state: string) => invoke<{ name: string; hasEditor: boolean; latency: number }>("plugin_create", { instance, desc, state }),
+  pluginRestart: (instance: number) => invoke<{ name: string; hasEditor: boolean; latency: number }>("plugin_restart", { instance }),
+  pluginEditor: (instance: number, open: boolean) => invoke<void>("plugin_editor", { instance, open }),
+  pluginStates: (instances: number[]) => invoke<Record<string, string>>("plugin_states", { instances }),
+  pluginStatus: () => invoke<{ instance: number; name: string; crashed: boolean; hasEditor: boolean }[]>("plugin_status"),
+  pluginRetain: (keep: number[]) => invoke<void>("plugin_retain", { keep }),
+  listAudioFiles: (dir: string, recursive: boolean) => invoke<string[]>("list_audio_files", { dir, recursive }),
+  batchProcess: (files: string[], steps: unknown[], options: unknown) =>
+    invoke<{ input: string; output: string | null; error: string | null }[]>("batch_process", { files, steps, options }),
   saveProject: (path: string, state: unknown, used: number[]) => invoke<void>("save_project", { path, state, used }),
   loadProject: (path: string) => invoke<{ state: any; sources: SourceInfo[]; ratio: number; missing: string[] }>("load_project", { path }),
 };

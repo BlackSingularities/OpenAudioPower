@@ -1,11 +1,12 @@
 {
   "name": "openaudiopower-ui",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:plughost": "node scripts/build-plughost.mjs",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri"
   },

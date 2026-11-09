@@ -314,6 +314,22 @@ export const OPS: OpDef[] = [
     params: [db("reduction", ["Redukcja", "Reduction"], 0, 40), pct("sensitivity", ["Czułość", "Sensitivity"])],
     defaults: { reduction: 18, sensitivity: 0.5 },
   },
+  {
+    op: "voiceDenoise",
+    label: ["Czysta mowa (AI)", "Clean voice (AI)"],
+    params: [
+      pct("strength", ["Usuwanie szumu", "Noise removal"]),
+      pct("dereverb", ["Usuwanie pogłosu", "Reverb removal"]),
+      { key: "room", label: ["Pogłos pomieszczenia", "Room reverb time"], min: 0.2, max: 2.5, step: 0.05, unit: "s" },
+    ],
+    defaults: { strength: 0.85, dereverb: 0.5, room: 0.6 },
+  },
+  {
+    op: "dereverb",
+    label: ["Usuwanie pogłosu", "Reverb removal"],
+    params: [pct("amount", ["Siła", "Amount"]), { key: "room", label: ["Pogłos pomieszczenia", "Room reverb time"], min: 0.2, max: 2.5, step: 0.05, unit: "s" }],
+    defaults: { amount: 0.6, room: 0.6 },
+  },
   { op: "declick", label: ["Usuwanie trzasków", "Declick"], params: [pct("strength", ["Siła", "Strength"])], defaults: { strength: 0.5 } },
   { op: "pitch", label: ["Zmiana wysokości", "Pitch shift"], params: [{ key: "semitones", label: ["Półtony", "Semitones"], min: -24, max: 24, step: 0.1, unit: "st" }], defaults: { semitones: 2 } },
   { op: "stretch", label: ["Rozciąganie w czasie", "Time stretch"], params: [{ key: "ratio", label: ["Długość", "Length"], min: 0.25, max: 4, step: 0.01, unit: "×", log: true }], defaults: { ratio: 1.25 }, changesLength: true },

@@ -12,6 +12,10 @@
   import Analyzer from "./components/Analyzer.svelte";
   import StemDialog from "./components/StemDialog.svelte";
   import ExportDialog from "./components/ExportDialog.svelte";
+  import BatchDialog from "./components/BatchDialog.svelte";
+  import SpectralEditor from "./components/SpectralEditor.svelte";
+  import RemixPanel from "./components/RemixPanel.svelte";
+  import PluginBrowser from "./components/PluginBrowser.svelte";
   import SettingsDialog from "./components/SettingsDialog.svelte";
   import InfoDialogs from "./components/InfoDialogs.svelte";
   import UpdateBanner from "./components/UpdateBanner.svelte";
@@ -26,6 +30,9 @@
     toStart, toEnd, seek, toggleLoop, setMetronome, splitAt, deleteSelected, deleteRange, undo, redo, copySelected, paste,
     duplicateSelected, selectAll, addMarker, addTrackCmd, zoomAt, zoomFit, hasUnsavedWork, dismissToast, toast,
     cancelJob, separateCmd,
+    openSpectral,
+    openRemix,
+    karaoke,
   } from "./lib/store.svelte";
 
   let updHidden = $state(false);
@@ -139,6 +146,10 @@
       if (k === "i") return run(pickImport);
       if (k === "e" && e.shiftKey) return run(separateCmd);
       if (k === "e") return run(() => ((app.exportMode = "mix"), (app.dialogs.export = true)));
+      if (k === "b") return run(() => (app.dialogs.batch = true));
+      if (k === "r" && e.shiftKey) return run(() => openSpectral());
+      if (k === "k" && e.shiftKey) return run(karaoke);
+      if (k === "m" && e.shiftKey) return run(() => openRemix());
       if (k === "c") return run(() => copySelected());
       if (k === "x") return run(() => copySelected(true));
       if (k === "v") return run(paste);
@@ -374,6 +385,10 @@
 
 <StemDialog />
 <ExportDialog />
+<BatchDialog />
+<SpectralEditor />
+<RemixPanel />
+<PluginBrowser />
 <SettingsDialog />
 <InfoDialogs />
 <UpdateBanner bind:hidden={updHidden} />

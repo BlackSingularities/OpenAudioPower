@@ -10,7 +10,13 @@ Studio do nagrywania, edycji, przetwarzania i separacji dźwięku dla Windows (R
 - **Efekty w czasie rzeczywistym** na ścieżkach i masterze: korektor parametryczny, filtry, kompresor, limiter, bramka, de-esser, pogłos, delay, chorus, flanger, phaser, tremolo, saturacja, bit crusher, narzędzie stereo, gotowe presety.
 - **Przetwarzanie**: normalizacja (szczyt / LUFS / RMS), wzmocnienie, redukcja szumu (z profilem), usuwanie trzasków, zmiana wysokości, rozciąganie w czasie, prędkość, odwracanie, usuwanie składowej stałej, mono/stereo i inne.
 - **Analiza**: EBU R128 (LUFS, LRA, true peak), RMS, korelacja, tempo (BPM), tonacja, spektrogram, analizator widma na żywo.
-- **Eksport**: WAV 16/24/32f, FLAC 16/24; cały miks, zaznaczenie, pętla albo każda ścieżka osobno; normalizacja do streamingu, podcastu lub broadcastu.
+- **Eksport**: WAV 16/24/32f, FLAC 16/24, MP3 (LAME), M4A/AAC (koder Windows), Ogg Vorbis i Opus; cały miks, zaznaczenie, pętla albo każda ścieżka osobno; normalizacja do streamingu, podcastu lub broadcastu.
+- **Automatyzacja** głośności i panoramy na każdej ścieżce: punkty rysowane na osi czasu, działają przy odtwarzaniu i eksporcie.
+- **Czysta mowa (AI)**: DeepFilterNet3 wbudowany w aplikację (bez pobierania, na procesorze) usuwa szum tła z nagrań głosu, a tłumienie późnego pogłosu zmniejsza echo pomieszczenia.
+- **Edytor spektralny** (Ctrl+Shift+R): zaznaczasz na spektrogramie kaszel, dzwonek albo pisk i wypełniasz to miejsce tłem albo tylko je wyciszasz.
+- **Remiks** (Ctrl+Shift+M): karaoke jednym kliknięciem (Ctrl+Shift+K), a cappella, osobne suwaki wokalu, perkusji, basu, gitary, pianina i reszty, zmiana tonacji samego podkładu i zgranie remiksu do nowej ścieżki.
+- **Wtyczki VST3 i CLAP** jako efekty na ścieżkach i masterze: skanowanie folderów, własne okna wtyczek, stan zapisywany w projekcie. Każda wtyczka działa w osobnym procesie (`oap-plughost.exe`), więc jej awaria albo zawieszenie nie zamyka programu – slot przepuszcza wtedy dźwięk bez zmian i można go uruchomić ponownie.
+- **Przetwarzanie wsadowe** (Ctrl+B): ten sam łańcuch operacji i efektów na wielu plikach albo całym folderze, z konwersją formatu.
 - **Projekty `.oap`**: JSON plus folder z audio w FLAC.
 - Zgłaszanie błędów i sugestii oraz sprawdzanie aktualizacji przez redzikowski.com (tak samo jak w pozostałych aplikacjach).
 

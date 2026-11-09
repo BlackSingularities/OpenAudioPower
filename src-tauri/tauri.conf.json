@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenAudioPower",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.redzikowski.openaudiopower",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1430",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build && npm run build:plughost"
   },
   "app": {
     "windows": [
@@ -39,7 +39,7 @@
     "shortDescription": "Audio recording, editing and stem separation studio",
     "longDescription": "OpenAudioPower records, edits and processes audio on a multitrack timeline and separates any song (MP3, FLAC, WAV…) into vocals, drums, bass, guitar, piano and other instruments. Design and development: redzikowski.com",
     "licenseFile": "../LICENSE",
-    "resources": { "redist/DirectML.dll": "DirectML.dll" },
+    "resources": { "redist/DirectML.dll": "DirectML.dll", "redist/oap-plughost.exe": "oap-plughost.exe" },
     "fileAssociations": [
       { "ext": ["oap"], "name": "OpenAudioPower project", "description": "OpenAudioPower project", "role": "Editor" }
     ],

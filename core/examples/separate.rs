@@ -54,6 +54,6 @@ fn main() {
     for s in &stems {
         let rms = openaudiopower_core::analysis::rms(&s.buf);
         println!("  {:8} rms {:.1} dB", s.name, openaudiopower_core::buffer::gain_to_db(rms));
-        write(&out.join(format!("{}.flac", s.name)), &s.buf, &EncodeOptions { format: Format::Flac, bits: 16, dither: true }).expect("write");
+        write(&out.join(format!("{}.flac", s.name)), &s.buf, &EncodeOptions { format: Format::Flac, bits: 16, dither: true, bitrate: 0 }).expect("write");
     }
 }

@@ -5,7 +5,8 @@
   import { lang, t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
   import { EFFECTS, GROUPS, PRESETS, effectDef } from "../lib/effects";
-  import { P, tp, commit, addEffect, applyPreset, track as getTrack, type Track, type FxSlot } from "../lib/store.svelte";
+  import { P, tp, app, commit, addEffect, applyPreset, openPluginEditor, restartPlugin, track as getTrack, type Track, type FxSlot } from "../lib/store.svelte";
+  import { api } from "../lib/api";
 
   let { target }: { target: Track | null } = $props();
   const L = (l: [string, string]) => (lang.current === "pl" ? l[0] : l[1]);
@@ -26,6 +27,10 @@
         open[s[s.length - 1].id] = true;
       } })),
     ]);
+    items.push({ sep: true } as any, { label: t("pluginsAdd"), icon: "sparkles", run: () => {
+      app.pluginTarget = target ? target.id : "master";
+      app.dialogs.plugins = true;
+    } } as any);
     openMenu({ clientX: r.left, clientY: r.bottom + 4 }, items);
   }
 
@@ -49,6 +54,11 @@
   }
 
   function remove(slot: FxSlot) {
+    // the helper keeps running (undo can bring the slot back), but its window goes
+    if (slot.spec.type === "plugin" && app.pluginEditor[slot.spec.instance]) {
+      api.pluginEditor(slot.spec.instance, false).catch(() => {});
+      app.pluginEditor[slot.spec.instance] = false;
+    }
     commit(() => {
       const l = list();
       l.splice(l.findIndex((x) => x.id === slot.id), 1);
@@ -86,13 +96,27 @@
       <div class="sh">
         <button class="pw" class:on={slot.on} onclick={() => toggle(slot)} aria-label={t("bypass")} data-tip={t("bypass")}><Icon name="power" size={12} /></button>
         <button class="title" onclick={() => (open[slot.id] = !open[slot.id])}>
-          <span class="n">{i + 1}</span>{def ? L(def.label) : slot.spec.type}
+          <span class="n">{i + 1}</span>{def ? L(def.label) : slot.spec.type === "plugin" ? slot.spec.name : slot.spec.type}
+          {#if slot.spec.type === "plugin"}<span class="fmt mono">{String(slot.spec.format).toUpperCase()}</span>{/if}
+          {#if slot.spec.type === "plugin" && app.pluginCrashed[slot.spec.instance]}<span class="down">{t("pluginDown")}</span>{/if}
           <Icon name={open[slot.id] ? "up" : "down"} size={13} />
         </button>
         <button class="btn sm ghost icon" onclick={() => move(slot, -1)} disabled={i === 0} aria-label={t("moveUp")}><Icon name="up" size={13} /></button>
         <button class="btn sm ghost icon" onclick={() => move(slot, 1)} disabled={i === slots.length - 1} aria-label={t("moveDown")}><Icon name="down" size={13} /></button>
         <button class="btn sm ghost icon" onclick={() => remove(slot)} aria-label={t("remove")}><Icon name="trash" size={13} /></button>
       </div>
+      {#if slot.spec.type === "plugin"}
+        <div class="sb plug">
+          {#if app.pluginCrashed[slot.spec.instance]}
+            <button class="btn sm" onclick={() => restartPlugin(slot.spec.instance)}><Icon name="refresh" size={13} />{t("pluginRestart")}</button>
+          {:else}
+            <button class="btn sm" class:primary={!app.pluginEditor[slot.spec.instance]} onclick={() => (app.pluginEditor[slot.spec.instance] ? api.pluginEditor(slot.spec.instance, false).then(() => (app.pluginEditor[slot.spec.instance] = false)) : openPluginEditor(slot.spec.instance))}>
+              <Icon name="sliders" size={13} />{app.pluginEditor[slot.spec.instance] ? t("close") : t("pluginOpen")}
+            </button>
+          {/if}
+          <span class="vendor">{slot.spec.vendor ?? ""}</span>
+        </div>
+      {/if}
       {#if open[slot.id] && def}
         <div class="sb">
           <ParamEditor params={def.params} values={slot.spec} defaults={def.defaults} onchange={(k, v) => set(slot, k, v)} />
@@ -165,6 +189,36 @@
   }
   .slot {
     border-top: 1px solid var(--line);
+  }
+  .fmt {
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    background: var(--glass-3);
+    color: var(--text-2);
+  }
+  .down {
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(248, 113, 113, 0.9);
+    color: #1a0606;
+  }
+  .plug {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 2px;
+  }
+  .vendor {
+    font-size: 11px;
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .slot:last-child {
     border-bottom: 1px solid var(--line);

@@ -8,7 +8,7 @@
   import { openMenu } from "../lib/menu.svelte";
   import { fmtDuration } from "../lib/format";
   import { forgetWave } from "../lib/wave";
-  import { app, tp, P, pickImport, addSourceToNewTrack, openStemDialog, toast, STEM_COLORS, peakCache, tracksOfSource, toggleMute, soloOnly } from "../lib/store.svelte";
+  import { S, app, tp, P, pickImport, addSourceToNewTrack, openStemDialog, toast, STEM_COLORS, peakCache, tracksOfSource, toggleMute, soloOnly } from "../lib/store.svelte";
 
   let query = $state("");
 
@@ -24,12 +24,15 @@
     e.dataTransfer!.effectAllowed = "copy";
   }
 
+  const KINDS = ["wav", "flac", "mp3", "m4a", "ogg", "opus"];
+
   async function exportSource(s: SourceInfo) {
-    const p = await saveDialog({ defaultPath: s.name.replace(/[<>:"/\\|?*]/g, "_") + ".wav", filters: [{ name: "WAV", extensions: ["wav"] }, { name: "FLAC", extensions: ["flac"] }] });
+    const p = await saveDialog({ defaultPath: s.name.replace(/[<>:"/\\|?*]/g, "_") + ".wav", filters: KINDS.map((k) => ({ name: k.toUpperCase(), extensions: [k] })) });
     if (!p) return;
-    const flac = p.toLowerCase().endsWith(".flac");
+    const ext = p.split(".").pop()?.toLowerCase() ?? "wav";
+    const format = KINDS.includes(ext) ? ext : "wav";
     try {
-      await api.exportSource(s.id, p, { format: flac ? "flac" : "wav", bits: 24, dither: true });
+      await api.exportSource(s.id, p, { format, bits: 24, dither: true, bitrate: S.settings.export.bitrate ?? 192 });
       toast(`${t("exported")}: ${p.split(/[\\/]/).pop()}`, "ok", { label: t("reveal"), run: () => revealItemInDir(p) });
     } catch (e) {
       toast(String(e), "error");

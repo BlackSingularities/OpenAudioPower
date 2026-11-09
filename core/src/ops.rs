@@ -59,6 +59,18 @@ pub enum Op {
     #[serde(rename_all = "camelCase")]
     TrimSilence { threshold: f32 },
     Declick { strength: f32 },
+    /// DeepFilterNet speech enhancement, optionally followed by late-reverb suppression.
+    #[serde(rename_all = "camelCase")]
+    VoiceDenoise { strength: f32, #[serde(default)] dereverb: f32, #[serde(default = "room_default")] room: f32 },
+    #[serde(rename_all = "camelCase")]
+    Dereverb { amount: f32, #[serde(default = "room_default")] room: f32 },
+    /// Spectral repair of the range between two frequencies.
+    #[serde(rename_all = "camelCase")]
+    SpectralRepair { f_lo: f32, f_hi: f32, mode: crate::enhance::RepairMode, #[serde(default)] gain: f32 },
+}
+
+fn room_default() -> f32 {
+    0.6
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -264,6 +276,45 @@ pub fn apply(src: &AudioBuffer, start: usize, end: usize, op: &Op, cancel: &Canc
             let mut p = part;
             declick(&mut p, *strength);
             p
+        }
+        Op::VoiceDenoise { strength, dereverb, room } => {
+            let ch: Result<Vec<Vec<f32>>, String> = part
+                .ch
+                .par_iter()
+                .map(|c| {
+                    let y = crate::enhance::voice_denoise(c, rate, *strength, cancel)?;
+                    Ok(if *dereverb > 0.01 { crate::enhance::dereverb(&y, rate, *room, *dereverb, cancel) } else { y })
+                })
+                .collect();
+            let mut p = AudioBuffer::from_channels(rate, ch?);
+            if !whole {
+                blend_edges(&part, &mut p, edge);
+            }
+            p
+        }
+        Op::Dereverb { amount, room } => {
+            let ch: Vec<Vec<f32>> = part.ch.par_iter().map(|c| crate::enhance::dereverb(c, rate, *room, *amount, cancel)).collect();
+            let mut p = AudioBuffer::from_channels(rate, ch);
+            if !whole {
+                blend_edges(&part, &mut p, edge);
+            }
+            p
+        }
+        Op::SpectralRepair { f_lo, f_hi, mode, gain } => {
+            // the repair needs the sound around the range as background reference
+            let margin = (rate as f32 * 0.4) as usize;
+            let a = s.saturating_sub(margin);
+            let b = (e + margin).min(n);
+            let seg = src.slice(a, b);
+            let ch: Vec<Vec<f32>> = seg
+                .ch
+                .par_iter()
+                .map(|c| crate::enhance::spectral_repair(c, rate, s - a, e - a, *f_lo, *f_hi, *mode, *gain))
+                .collect();
+            if cancel.is_set() {
+                return Err("cancelled".into());
+            }
+            return Ok(src.splice(a, b, &AudioBuffer::from_channels(rate, ch)));
         }
     };
     if cancel.is_set() {

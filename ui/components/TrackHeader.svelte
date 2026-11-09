@@ -3,7 +3,7 @@
   import Meter from "./Meter.svelte";
   import { t } from "../lib/i18n.svelte";
   import { openMenu } from "../lib/menu.svelte";
-  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly } from "../lib/store.svelte";
+  import { type Track, P, ed, tp, commit, beginGesture, endGesture, syncEngine, removeTrack, TRACK_COLORS, track as getTrack, openStemDialog, toggleMute, soloOnly, autoOf } from "../lib/store.svelte";
 
   let { tr }: { tr: Track } = $props();
 
@@ -20,6 +20,25 @@
         P.p.tracks.forEach((o) => (o.armed = false));
         x.armed = v;
       } else x[key] = !x[key];
+    });
+  }
+
+  const autoShow = $derived(tr.auto?.show ?? "off");
+  const autoCount = $derived((tr.auto?.volume.length ?? 0) + (tr.auto?.pan.length ?? 0));
+
+  /** off → volume → pan → off; only changes which envelope the lane shows */
+  function cycleAuto() {
+    const x = getTrack(tr.id)!;
+    const a = autoOf(x);
+    a.show = a.show === "off" ? "volume" : a.show === "volume" ? "pan" : "off";
+    ed.selTrack = tr.id;
+  }
+
+  function clearAuto() {
+    commit(() => {
+      const a = autoOf(getTrack(tr.id)!);
+      a.volume = [];
+      a.pan = [];
     });
   }
 
@@ -56,6 +75,10 @@
       { sep: true },
       { label: t("effects"), icon: "fx", run: () => ((ed.selTrack = tr.id), (ed.inspectorTab = "track")) },
       { label: t("stemSeparation"), icon: "stems", disabled: !tr.clips.length, run: () => ((ed.selClips = [tr.clips[0].id]), openStemDialog()) },
+      { sep: true },
+      { label: t("autoVolume"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "volume") },
+      { label: t("autoPan"), icon: "chart", run: () => (autoOf(getTrack(tr.id)!).show = "pan") },
+      { label: t("autoClear"), icon: "x", disabled: !autoCount, run: clearAuto },
       { sep: true },
       { label: t("removeTrack"), icon: "trash", danger: true, run: () => removeTrack(tr.id) },
     ]);
@@ -114,6 +137,9 @@
     <button class="tb r" class:on={tr.armed} onclick={() => toggle("armed")} data-tip={t("arm")}><Icon name="record" size={11} /></button>
     <button class="tb fx" class:on={tr.effects.some((x) => x.on)} onclick={() => ((ed.selTrack = tr.id), (ed.inspectorTab = "track"))} data-tip={t("effects")}>
       FX{#if tr.effects.length}<span class="n">{tr.effects.length}</span>{/if}
+    </button>
+    <button class="tb au" class:on={autoShow !== "off"} class:has={autoCount > 0} onclick={cycleAuto} data-tip={autoShow === "off" ? t("autoVolume") : autoShow === "volume" ? t("autoPan") : t("autoOff")}>
+      <Icon name="chart" size={11} />{autoShow === "volume" ? "VOL" : autoShow === "pan" ? "PAN" : ""}
     </button>
     <div class="grow"></div>
     {#if m.gr > 0.5}<span class="gr mono" data-tip={t("reduction")}>−{m.gr.toFixed(0)}</span>{/if}
@@ -242,6 +268,16 @@
     border-color: rgba(var(--accent-rgb), 0.8);
     color: #fff;
     background: rgba(var(--accent-rgb), 0.3);
+  }
+  .tb.au.has {
+    color: #fbbf24;
+  }
+  .tb.au.on {
+    border-color: rgba(251, 191, 36, 0.8);
+    background: rgba(251, 191, 36, 0.22);
+    color: #fff;
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
   }
   .n {
     font-size: 9.5px;

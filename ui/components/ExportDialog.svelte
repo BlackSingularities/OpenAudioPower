@@ -10,6 +10,30 @@
   const ex = S.settings.export;
   let busy = $state(false);
 
+  const FORMATS = [
+    { id: "wav", label: "WAV" },
+    { id: "flac", label: "FLAC" },
+    { id: "mp3", label: "MP3" },
+    { id: "m4a", label: "M4A" },
+    { id: "ogg", label: "OGG" },
+    { id: "opus", label: "Opus" },
+  ];
+  /** bitrates each lossy encoder supports (kbit/s); the middle one is the default */
+  const RATES: Record<string, number[]> = {
+    mp3: [128, 192, 256, 320],
+    m4a: [96, 128, 160, 192],
+    ogg: [128, 192, 256, 320],
+    opus: [96, 128, 160, 256],
+  };
+  const lossy = $derived(ex.format in RATES);
+
+  function pickFormat(f: string) {
+    ex.format = f;
+    if (f === "flac" && ex.bits > 24) ex.bits = 24;
+    const r = RATES[f];
+    if (r && !r.includes(ex.bitrate)) ex.bitrate = r.reduce((a, b) => (Math.abs(b - 192) < Math.abs(a - 192) ? b : a));
+  }
+
   const range = $derived.by(() => {
     if (app.exportMode === "selection" && ed.sel) return { start: ed.sel.start, end: ed.sel.end };
     if (app.exportMode === "loop" && P.p.loop.end > P.p.loop.start) return { start: P.p.loop.start, end: P.p.loop.end };
@@ -21,6 +45,7 @@
     return {
       format: ex.format,
       bits: ex.format === "flac" ? Math.min(24, ex.bits) : ex.bits,
+      bitrate: ex.bitrate ?? 192,
       dither: true,
       start: range.start,
       end: range.end,
@@ -77,15 +102,25 @@
         </div>
         <div class="label">{t("format")}</div>
         <div class="seg full">
-          <button class:on={ex.format === "wav"} onclick={() => (ex.format = "wav")}>WAV</button>
-          <button class:on={ex.format === "flac"} onclick={() => ((ex.format = "flac"), ex.bits > 24 && (ex.bits = 24))}>FLAC</button>
+          {#each FORMATS as f}
+            <button class:on={ex.format === f.id} onclick={() => pickFormat(f.id)}>{f.label}</button>
+          {/each}
         </div>
-        <div class="label">{t("bitDepth")}</div>
-        <div class="seg full">
-          <button class:on={ex.bits === 16} onclick={() => (ex.bits = 16)}>16 bit</button>
-          <button class:on={ex.bits === 24} onclick={() => (ex.bits = 24)}>24 bit</button>
-          <button class:on={ex.bits === 32} disabled={ex.format === "flac"} onclick={() => (ex.bits = 32)}>32 bit float</button>
-        </div>
+        {#if lossy}
+          <div class="label">{t("bitrate")}</div>
+          <div class="seg full">
+            {#each RATES[ex.format] as r}
+              <button class:on={ex.bitrate === r} onclick={() => (ex.bitrate = r)}>{r} kbit/s</button>
+            {/each}
+          </div>
+        {:else}
+          <div class="label">{t("bitDepth")}</div>
+          <div class="seg full">
+            <button class:on={ex.bits === 16} onclick={() => (ex.bits = 16)}>16 bit</button>
+            <button class:on={ex.bits === 24} onclick={() => (ex.bits = 24)}>24 bit</button>
+            <button class:on={ex.bits === 32} disabled={ex.format === "flac"} onclick={() => (ex.bits = 32)}>32 bit float</button>
+          </div>
+        {/if}
         <div class="label">{t("sampleRate")}</div>
         <select bind:value={ex.rate}>
           <option value={0}>{t("projectRate")} ({app.rate} Hz)</option>
@@ -113,9 +148,20 @@
 {/if}
 
 <style>
+  .dialog {
+    width: min(680px, 100%);
+  }
+  /* rows of options wrap instead of running past the dialog edge */
+  .grid .seg.full {
+    flex-wrap: wrap;
+  }
+  .grid .seg.full button {
+    flex: 1 1 auto;
+    padding: 0 9px;
+  }
   .grid {
     display: grid;
-    grid-template-columns: 130px 1fr;
+    grid-template-columns: 130px minmax(0, 1fr);
     gap: 12px 14px;
     align-items: center;
   }

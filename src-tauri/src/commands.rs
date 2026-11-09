@@ -620,7 +620,7 @@ pub async fn export_tracks(h: AppHandle, dir: String, project: Project, options:
             }];
             let buf = mix::render_range(&single, &src, app.rate(), options.start, end, options.tail, &|_| {}, &cancel);
             let buf = finish(buf, &options);
-            let ext = if options.enc.format == encode::Format::Flac { "flac" } else { "wav" };
+            let ext = options.enc.format.ext();
             let safe: String = t.name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
             let p = Path::new(&dir).join(format!("{:02} {}.{ext}", i + 1, if safe.is_empty() { "track".into() } else { safe }));
             encode::write(&p, &buf, &options.enc)?;
@@ -642,6 +642,117 @@ pub async fn export_source(h: AppHandle, id: u64, path: String, options: ExportO
         let buf = if a == 0 && b == n { (*s.buf).clone() } else { s.buf.slice(a, b) };
         let buf = finish(buf, &options);
         encode::write(Path::new(&path), &buf, &options.enc)
+    })
+    .await
+}
+
+// ───────────────────────────── batch processing ─────────────────────────────
+
+/// Audio files in `dir` (optionally with subfolders), sorted by path.
+#[tauri::command]
+pub fn list_audio_files(dir: String, recursive: bool) -> R<Vec<String>> {
+    fn walk(d: &Path, recursive: bool, out: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(d) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if recursive {
+                    walk(&p, true, out);
+                }
+            } else if decode::is_supported(&p) {
+                out.push(p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(Path::new(&dir), recursive, &mut out);
+    out.sort_by_key(|p| p.to_lowercase());
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchOptions {
+    #[serde(flatten)]
+    enc: EncodeOptions,
+    /// empty = next to each source file
+    #[serde(default)]
+    out_dir: String,
+    /// appended to the file name, e.g. " (normalised)"
+    #[serde(default)]
+    suffix: String,
+    /// write each file in its own format when the encoder supports it
+    #[serde(default)]
+    keep_format: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult {
+    input: String,
+    output: Option<String>,
+    error: Option<String>,
+}
+
+/// First free path: `name.ext`, then `name (2).ext`, … – never overwrites the source or earlier output.
+fn free_path(dir: &Path, stem: &str, ext: &str, avoid: &Path) -> PathBuf {
+    let mut p = dir.join(format!("{stem}.{ext}"));
+    let mut k = 2;
+    while p.exists() || p == avoid {
+        p = dir.join(format!("{stem} ({k}).{ext}"));
+        k += 1;
+    }
+    p
+}
+
+/// Runs the same chain of operations on every file and writes the results.
+/// One failing file does not stop the rest; each gets its own result.
+#[tauri::command]
+pub async fn batch_process(h: AppHandle, files: Vec<String>, steps: Vec<Op>, options: BatchOptions) -> R<Vec<BatchResult>> {
+    let app = app_state(&h);
+    let cancel = app.new_job();
+    let emit = emitter(&h, "batch");
+    blocking(move || {
+        let total = files.len().max(1);
+        let mut results = Vec::with_capacity(files.len());
+        for (i, input) in files.iter().enumerate() {
+            if cancel.is_set() {
+                return Err("cancelled".into());
+            }
+            let src = Path::new(input);
+            let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let base = i as f32 / total as f32;
+            let step = 1.0 / total as f32;
+            emit(base, &name);
+            let run = || -> R<String> {
+                let (mut buf, _) = decode::decode_file(src, &cancel, &|f| emit(base + step * 0.3 * f, &name))?;
+                for (k, op) in steps.iter().enumerate() {
+                    if cancel.is_set() {
+                        return Err("cancelled".into());
+                    }
+                    buf = ops::apply(&buf, 0, 0, op, &cancel)?;
+                    emit(base + step * (0.3 + 0.6 * (k + 1) as f32 / steps.len().max(1) as f32), &name);
+                }
+                let mut enc = options.enc;
+                if options.keep_format {
+                    if let Some(f) = src.extension().and_then(|e| e.to_str()).and_then(encode::Format::from_ext) {
+                        enc.format = f;
+                    }
+                }
+                let dir = if options.out_dir.is_empty() { src.parent().map(Path::to_path_buf).unwrap_or_default() } else { PathBuf::from(&options.out_dir) };
+                let stem = format!("{}{}", src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "audio".into()), options.suffix);
+                let target = free_path(&dir, &stem, enc.format.ext(), src);
+                encode::write(&target, &buf, &enc)?;
+                Ok(target.to_string_lossy().into_owned())
+            };
+            match run() {
+                Ok(out) => results.push(BatchResult { input: input.clone(), output: Some(out), error: None }),
+                Err(e) if e == "cancelled" => return Err(e),
+                Err(e) => results.push(BatchResult { input: input.clone(), output: None, error: Some(e) }),
+            }
+        }
+        emit(1.0, "");
+        Ok(results)
     })
     .await
 }
@@ -696,7 +807,7 @@ pub async fn save_project(h: AppHandle, path: String, state: serde_json::Value, 
             let target = dir.join(&file);
             let already = s.saved_as.lock().as_ref().map(|x| x == &target && x.exists()).unwrap_or(false);
             if !already {
-                encode::write(&target, &s.buf, &EncodeOptions { format: encode::Format::Flac, bits: 24, dither: false })?;
+                encode::write(&target, &s.buf, &EncodeOptions { format: encode::Format::Flac, bits: 24, dither: false, bitrate: 0 })?;
                 *s.saved_as.lock() = Some(target.clone());
             }
             saved.push(SavedSource {

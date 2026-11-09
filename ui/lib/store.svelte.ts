@@ -6,6 +6,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { api, type AppInfo, type PollState, type SourceInfo, type Peaks, type Bands } from "./api";
 import { t, setLang, stemLabel, type Lang } from "./i18n.svelte";
 import { newSpec, PRESETS } from "./effects";
+import type { PluginDesc } from "./api";
 
 // ───────────────────────────── types ─────────────────────────────
 
@@ -26,6 +27,19 @@ export interface FxSlot {
   on: boolean;
   spec: any;
 }
+export interface AutoPoint {
+  /** timeline frame */
+  t: number;
+  /** dB for volume, −1…1 for pan */
+  v: number;
+}
+export type AutoLane = "volume" | "pan";
+export interface Automation {
+  /** which envelope is drawn and edited on the lane; automation plays back either way */
+  show: "off" | AutoLane;
+  volume: AutoPoint[];
+  pan: AutoPoint[];
+}
 export interface Track {
   id: number;
   name: string;
@@ -38,6 +52,8 @@ export interface Track {
   height: number;
   effects: FxSlot[];
   clips: Clip[];
+  /** missing in projects saved before automation existed */
+  auto?: Automation;
 }
 export interface Marker {
   id: number;
@@ -81,8 +97,9 @@ const defaultSettings = () => ({
   wave: { scale: "relative" as "relative" | "db" | "linear", style: "fill" as "fill" | "rms" | "bars" | "outline", color: "track" as "track" | "spectral" | "gradient" },
   timeMode: "time" as "time" | "bars",
   ui: { library: true, inspector: true, dock: "mixer" as "mixer" | "analyzer" | null, dockHeight: 230, libraryWidth: 270, inspectorWidth: 330, onboarded: false },
+  plugins: { dirs: [] as string[] },
   stems: { engine: "htdemucs_6s", quality: 1, useGpu: true, muteOriginal: true },
-  export: { format: "wav", bits: 24, norm: "none", rate: 0, tail: 2 },
+  export: { format: "wav", bits: 24, bitrate: 192, norm: "none", rate: 0, tail: 2 },
   recent: [] as string[],
 });
 
@@ -121,8 +138,18 @@ export const app = $state({
   sources: [] as SourceInfo[],
   job: null as Job | null,
   toasts: [] as Toast[],
-  dialogs: { stems: false, export: false, settings: false, about: false, shortcuts: false, exit: false, rename: false },
+  dialogs: { stems: false, export: false, batch: false, spectral: false, remix: false, plugins: false, settings: false, about: false, shortcuts: false, exit: false, rename: false },
   stemSource: null as { id: number; start: number; end: number; trackId: number | null; clipStart: number } | null,
+  /** effect chain the plug-in browser adds to: a track id, or "master" */
+  pluginTarget: null as null | number | "master",
+  /** plug-in instances whose helper process died */
+  pluginCrashed: {} as Record<number, boolean>,
+  /** plug-in instances with an open editor window */
+  pluginEditor: {} as Record<number, boolean>,
+  /** song the remix panel works on */
+  remix: null as null | { clip: number; track: number; song: number; orig: Record<number, number>; semis: number; withVocals: boolean },
+  /** clip opened in the spectral editor */
+  spectralClip: null as number | null,
   exportMode: "mix" as "mix" | "loop" | "selection" | "tracks",
   path: "" as string,
   dirty: false,
@@ -394,6 +421,31 @@ export function snapFrame(f: number, force = false): number {
   return Math.round(f / step) * step;
 }
 
+/** The track's automation, created on first use (call inside `commit`). */
+export function autoOf(tr: Track): Automation {
+  if (!tr.auto) tr.auto = { show: "off", volume: [], pan: [] };
+  return tr.auto;
+}
+
+/** Display / default range of each envelope. */
+export const AUTO_RANGE: Record<AutoLane, { min: number; max: number; def: (tr: Track) => number }> = {
+  volume: { min: -36, max: 6, def: () => 0 },
+  pan: { min: -1, max: 1, def: (tr) => tr.pan },
+};
+
+/** Envelope value at frame `t`, linear between points, held outside them. */
+export function envelopeAt(points: AutoPoint[], t: number, def: number): number {
+  if (!points.length) return def;
+  if (t <= points[0].t) return points[0].v;
+  const last = points[points.length - 1];
+  if (t >= last.t) return last.v;
+  let i = 1;
+  while (points[i].t <= t) i++;
+  const a = points[i - 1];
+  const b = points[i];
+  return a.v + ((b.v - a.v) * (t - a.t)) / Math.max(1, b.t - a.t);
+}
+
 export function newTrack(name?: string, color?: string, at?: number): Track {
   const tr: Track = {
     id: uid(),
@@ -407,6 +459,7 @@ export function newTrack(name?: string, color?: string, at?: number): Track {
     height: 96,
     effects: [],
     clips: [],
+    auto: { show: "off", volume: [], pan: [] },
   };
   if (at !== undefined) P.p.tracks.splice(at, 0, tr);
   else P.p.tracks.push(tr);
@@ -512,6 +565,7 @@ export async function saveProject(as = false): Promise<boolean> {
   }
   const name = path.split(/[\\/]/).pop()!.replace(/\.oap$/i, "");
   P.p.name = name;
+  await collectPluginStates();
   const ok = await job("save", () => api.saveProject(path, $state.snapshot(P.p), usedSources()));
   if (ok === undefined) return false;
   app.path = path;
@@ -548,6 +602,7 @@ export async function openProject(path?: string) {
       c.fadeOut = Math.round(c.fadeOut * k);
     }
     st.markers.forEach((m) => (m.pos = Math.round(m.pos * k)));
+    for (const tr of st.tracks) for (const pt of [...(tr.auto?.volume ?? []), ...(tr.auto?.pan ?? [])]) pt.t = Math.round(pt.t * k);
     st.loop.start = Math.round(st.loop.start * k);
     st.loop.end = Math.round(st.loop.end * k);
   }
@@ -561,6 +616,7 @@ export async function openProject(path?: string) {
   ed.selTrack = st.tracks[0]?.id ?? null;
   app.path = path!;
   app.dirty = false;
+  await startProjectPlugins();
   syncEngine();
   zoomFit();
   remember(path!);
@@ -574,6 +630,9 @@ export async function newProject() {
   app.sources = [];
   peakCache.clear();
   P.p = emptyProject();
+  api.pluginRetain([]).catch(() => {});
+  app.pluginCrashed = {};
+  app.pluginEditor = {};
   undoStack.length = 0;
   redoStack.length = 0;
   hist.canUndo = hist.canRedo = false;
@@ -895,6 +954,31 @@ export async function applyOp(op: any, useRange: boolean, changesLength = false,
   });
 }
 
+/** Runs a length-preserving operation on source frames `[a, b)` of one clip and points the clip
+ * at the result (spectral editor). Returns the new source, or null when cancelled / failed. */
+/** Opens the spectral editor on the selected clip (or the first clip under the playhead). */
+export function openSpectral(clipId?: number) {
+  const id = clipId ?? ed.selClips[0] ?? P.p.tracks.flatMap((t) => t.clips).find((c) => c.start <= tp.pos && c.start + c.len > tp.pos)?.id;
+  if (id == null) return toast(t("noSelection"), "info");
+  app.spectralClip = id;
+  app.dialogs.spectral = true;
+}
+
+export async function applyOpToClip(clipId: number, a: number, b: number, op: any): Promise<SourceInfo | null> {
+  const f = findClip(clipId);
+  if (!f) return null;
+  const s = source(f.clip.source);
+  if (!s) return null;
+  const res = await job("process", () => api.applyOp(s.id, a, b, op));
+  if (!res) return null;
+  addSources([res]);
+  commit(() => {
+    const c = findClip(clipId)?.clip;
+    if (c) c.source = res.id;
+  });
+  return res;
+}
+
 export async function bounceRange() {
   const s = ed.sel ?? (P.p.loop.on ? { start: P.p.loop.start, end: P.p.loop.end } : { start: 0, end: projectLength() });
   if (s.end <= s.start) return;
@@ -961,6 +1045,210 @@ export async function importAndSeparate() {
 export function separateCmd() {
   if (!app.sources.some((s) => s.kind !== "stem")) importAndSeparate();
   else openStemDialog();
+}
+
+// ───────────────────────────── VST3 / CLAP plug-ins ─────────────────────────────
+
+/** Every plug-in slot in the project (tracks and master). */
+export function pluginSlots(p: ProjectState = P.p): FxSlot[] {
+  return [...p.tracks.flatMap((tr) => tr.effects), ...p.master.effects].filter((s) => s.spec?.type === "plugin");
+}
+
+/** Starts the plug-in in its own process and adds it to the chain, then opens its window. */
+export async function addPlugin(target: number | "master", desc: PluginDesc) {
+  const id = uid();
+  const r = await job("plugin", () => api.pluginCreate(id, desc, ""));
+  if (!r) return;
+  commit(() => {
+    const slot: FxSlot = { id, on: true, spec: { type: "plugin", instance: id, name: r.name || desc.name, format: desc.format, path: desc.path, id: desc.id, vendor: desc.vendor, state: "" } };
+    if (target === "master") P.p.master.effects.push(slot);
+    else track(target)?.effects.push(slot);
+  });
+  delete app.pluginCrashed[id];
+  if (r.hasEditor) openPluginEditor(id);
+}
+
+export async function openPluginEditor(instance: number) {
+  try {
+    await api.pluginEditor(instance, true);
+    app.pluginEditor[instance] = true;
+  } catch (e) {
+    toast(`${t("error")}: ${e}`, "error");
+  }
+}
+
+export async function restartPlugin(instance: number) {
+  const r = await job("plugin", () => api.pluginRestart(instance));
+  if (!r) return;
+  delete app.pluginCrashed[instance];
+  toast(t("pluginRestarted"), "ok");
+}
+
+/** Writes each running plug-in's state into its slot (before saving the project). */
+async function collectPluginStates() {
+  const slots = pluginSlots();
+  if (!slots.length) return;
+  const states = await api.pluginStates(slots.map((s) => s.spec.instance)).catch(() => ({}) as Record<string, string>);
+  for (const s of slots) {
+    const v = states[String(s.spec.instance)];
+    if (v) s.spec.state = v;
+  }
+}
+
+/** Starts the plug-ins of a freshly opened project; ends the ones no longer used. */
+async function startProjectPlugins() {
+  const slots = pluginSlots();
+  await api.pluginRetain(slots.map((s) => s.spec.instance)).catch(() => {});
+  app.pluginCrashed = {};
+  app.pluginEditor = {};
+  const failed: string[] = [];
+  for (const s of slots) {
+    const d = s.spec;
+    try {
+      await api.pluginCreate(d.instance, { format: d.format, path: d.path, id: d.id, name: d.name, vendor: d.vendor ?? "", version: "", category: "", instrument: false }, d.state ?? "");
+    } catch {
+      failed.push(d.name);
+      app.pluginCrashed[d.instance] = true;
+    }
+  }
+  if (failed.length) toast(`${t("pluginsMissing")}: ${failed.join(", ")}`, "error", undefined, 9000);
+}
+
+// ───────────────────────────── remix ─────────────────────────────
+
+/** The original file behind a source (edits point at it through `parent`). */
+function songRoot(id: number): number {
+  const s = source(id);
+  return s && s.kind !== "stem" && s.parent != null ? s.parent : id;
+}
+
+/** Tracks holding stems separated from `songId` (or from any edit of it). */
+export function stemTracksOf(songId: number): Track[] {
+  const root = songRoot(songId);
+  return P.p.tracks.filter((tr) =>
+    tr.clips.some((c) => {
+      const cs = source(c.source);
+      return !!(cs?.stem && cs.parent != null && songRoot(cs.parent) === root);
+    }),
+  );
+}
+
+const stemOf = (tr: Track) => source(tr.clips[0]?.source ?? -1)?.stem ?? "";
+
+/** Opens the remix panel for the selected song clip (a selected stem leads back to its song). */
+export function openRemix(): boolean {
+  let sel = selectedClips()[0];
+  if (sel) {
+    const s = source(sel.clip.source);
+    if (s?.stem && s.parent != null) {
+      const root = songRoot(s.parent);
+      const songClip = P.p.tracks.flatMap((tr) => tr.clips.map((c) => ({ clip: c, track: tr }))).find((x) => songRoot(x.clip.source) === root && !source(x.clip.source)?.stem);
+      if (songClip) sel = songClip;
+    }
+  } else {
+    sel = P.p.tracks.flatMap((tr) => tr.clips.map((c) => ({ clip: c, track: tr }))).find((x) => !source(x.clip.source)?.stem)!;
+  }
+  if (!sel) {
+    toast(t("noSelection"), "info");
+    return false;
+  }
+  if (app.remix?.clip !== sel.clip.id) app.remix = { clip: sel.clip.id, track: sel.track.id, song: sel.clip.source, orig: {}, semis: 0, withVocals: false };
+  app.dialogs.remix = true;
+  return true;
+}
+
+/** Separates the remix song with the engine chosen in the separation settings (all stems). */
+export async function separateForRemix(): Promise<boolean> {
+  const r = app.remix;
+  const f = r ? findClip(r.clip) : null;
+  if (!r || !f) return false;
+  const engine = S.settings.stems.engine;
+  if (engine !== "dsp") {
+    const models = await api.models().catch(() => []);
+    if (!models.find((m) => m.id === engine && m.installed)) {
+      // the model has to be downloaded first – the separation dialog does that
+      ed.selClips = [f.clip.id];
+      openStemDialog();
+      return false;
+    }
+  }
+  const c = f.clip;
+  const res = await job("separate", () => api.separate(c.source, c.offset, c.offset + c.len, { engine, gpu: S.settings.stems.useGpu, quality: S.settings.stems.quality }, []));
+  if (!res) return false;
+  app.sources.push(...res.stems);
+  addStemTracks(res.stems, c.start, f.track.id);
+  return true;
+}
+
+/** Karaoke / a cappella / everything: mutes stems by kind; the original song track stays muted. */
+export function remixPreset(kind: "karaoke" | "acappella" | "all") {
+  const r = app.remix;
+  if (!r) return;
+  commit(() => {
+    for (const tr of stemTracksOf(r.song)) {
+      const v = stemOf(tr) === "vocals";
+      tr.mute = kind === "karaoke" ? v : kind === "acappella" ? !v : false;
+      tr.solo = false;
+      tr.gain = 0;
+    }
+    const o = track(r.track);
+    if (o) o.mute = true;
+  });
+}
+
+/** One click: separate if needed, then mute the vocals. */
+export async function karaoke() {
+  if (!openRemix()) return;
+  if (!stemTracksOf(app.remix!.song).length && !(await separateForRemix())) return;
+  remixPreset("karaoke");
+  toast(t("karaokeReady"), "ok");
+}
+
+/** Transposes the backing stems (optionally also the vocals) by `semis`, always from the
+ * original stems so repeated changes do not pile up. */
+export async function remixTranspose(semis: number, withVocals: boolean) {
+  const r = app.remix;
+  if (!r) return;
+  const tracks = stemTracksOf(r.song);
+  for (const tr of tracks) if (r.orig[tr.id] == null && tr.clips[0]) r.orig[tr.id] = tr.clips[0].source;
+  const work = tracks.filter((tr) => tr.clips[0] && (withVocals || stemOf(tr) !== "vocals"));
+  const out = new Map<number, number>();
+  const ok = await job("process", async () => {
+    let i = 0;
+    for (const tr of work) {
+      const orig = r.orig[tr.id];
+      if (semis === 0) out.set(tr.id, orig);
+      else {
+        const res = await api.applyOp(orig, 0, 0, { op: "pitch", semitones: semis });
+        addSources([res]);
+        out.set(tr.id, res.id);
+      }
+      app.job = { kind: "process", fraction: ++i / work.length, label: tr.name };
+    }
+    return true;
+  });
+  if (!ok) return;
+  commit(() => {
+    for (const tr of tracks) {
+      const x = track(tr.id);
+      const id = out.get(tr.id) ?? (withVocals ? undefined : r.orig[tr.id]);
+      if (x?.clips[0] && id != null) x.clips[0].source = id;
+    }
+  });
+  r.semis = semis;
+  r.withVocals = withVocals;
+}
+
+/** Mixes the song's span down to a new track (the remix as one file). */
+export async function bounceRemix() {
+  const f = app.remix ? findClip(app.remix.clip) : null;
+  if (!f) return;
+  const { start, len } = f.clip;
+  const p = $state.snapshot(P.p);
+  const src = await job("bounce", () => api.bounce({ tracks: p.tracks, master: p.master }, start, start + len, `${t("remixTitle")} ${new Date().toLocaleTimeString()}`));
+  if (!src) return;
+  addSources([src]);
+  addSourceToNewTrack(src, start, "#64748b");
 }
 
 // ───────────────────────────── quick mute / solo ─────────────────────────────
@@ -1091,6 +1379,15 @@ export async function init() {
   app.info = await api.appInfo();
   app.rate = app.info.rate;
   ed.fpp = app.rate / 50;
+  await listen<{ instance: number; kind: string; message: string }>("plugin", (e) => {
+    const { instance, kind } = e.payload;
+    if (kind === "crashed") {
+      app.pluginCrashed[instance] = true;
+      app.pluginEditor[instance] = false;
+      toast(`${t("pluginCrashed")}: ${e.payload.message}`, "error", { label: t("pluginRestart"), run: () => restartPlugin(instance) }, 12000);
+    } else if (kind === "editorClosed") app.pluginEditor[instance] = false;
+    else if (kind === "editorOpened") app.pluginEditor[instance] = true;
+  });
   await listen<Job>("job", (e) => {
     if (app.job) app.job = { ...app.job, fraction: e.payload.fraction, label: e.payload.label };
   });

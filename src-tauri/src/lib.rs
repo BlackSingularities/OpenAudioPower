@@ -2,6 +2,7 @@
 
 mod commands;
 mod engine;
+mod plugins;
 mod state;
 
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub fn run() {
             let engine = engine::Engine::start(preferred);
             let st = state::App::new(engine, data.join("models"), config, files.clone());
             app.manage(Arc::new(st));
+            plugins::install();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,6 +66,16 @@ pub fn run() {
             commands::export_mix,
             commands::export_tracks,
             commands::export_source,
+            commands::list_audio_files,
+            commands::batch_process,
+            plugins::plugin_dirs,
+            plugins::plugin_scan,
+            plugins::plugin_create,
+            plugins::plugin_restart,
+            plugins::plugin_editor,
+            plugins::plugin_states,
+            plugins::plugin_status,
+            plugins::plugin_retain,
             commands::save_project,
             commands::load_project,
         ])
