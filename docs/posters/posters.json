@@ -1,0 +1,22 @@
+{
+  "slug": "openaudiopower",
+  "name": "OpenAudioPower",
+  "label": "studio nagrań i separacji dźwięku",
+  "icon": "icon.png",
+  "url": "https://redzikowski.com/portfolio/openaudiopower",
+  "posters": [
+    {
+      "platform": "windows",
+      "file": "windows.png",
+      "title": "Piosenka *na ścieżki*",
+      "lead": "Dowolny utwór rozbity na wokal, perkusję, bas, gitarę, pianino i resztę w kilka sekund – od razu na osi czasu.",
+      "shots": [
+        { "src": "../screenshots/windows/01-sciezki.png", "caption": "Sześć ścieżek z jednego utworu" },
+        { "src": "../screenshots/windows/02-separacja.png", "caption": "Separacja HT-Demucs" },
+        { "src": "../screenshots/windows/03-analizator.png", "caption": "Analizator widma" }
+      ],
+      "features": ["separacja na 6 ścieżek", "nagrywanie WASAPI", "mikser i efekty na żywo", "odszumianie", "pomiar LUFS", "eksport WAV i FLAC"],
+      "meta": "Windows 10 i 11, 64-bit"
+    }
+  ]
+}

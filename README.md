@@ -1,5 +1,13 @@
 # OpenAudioPower
 
+<!-- posters:start -->
+<p align="center">
+  <img src="docs/posters/windows.png" alt="OpenAudioPower – Windows" width="460">
+</p>
+
+<p align="center"><a href="https://redzikowski.com/portfolio/openaudiopower">redzikowski.com/portfolio/openaudiopower</a></p>
+<!-- posters:end -->
+
 Studio do nagrywania, edycji, przetwarzania i separacji dźwięku dla Windows (Rust + Tauri 2 + Svelte 5).
 
 ## Funkcje
